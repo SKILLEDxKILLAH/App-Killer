@@ -1,0 +1,34 @@
+HOW TO USE THE TRAINED LoRA (in A1111 / Forge / ComfyUI / InvokeAI)
+==================================================================
+
+1. Copy  output/gls2p5d_illustrious_style.safetensors  into your UI's LoRA folder:
+     A1111 / Forge : stable-diffusion-webui/models/Lora/
+     ComfyUI       : ComfyUI/models/loras/
+     InvokeAI      : import via the Model Manager
+
+2. Use an Illustrious XL (or any SDXL) checkpoint as the base model.
+
+3. Add the LoRA to your prompt and include the TRIGGER WORD:
+     A1111/Forge :  <lora:gls2p5d_illustrious_style:0.8> gls2p5d_style, ...
+     ComfyUI     :  LoraLoader node, strength 0.7-0.9, + "gls2p5d_style" in the text
+
+RECOMMENDED SETTINGS
+  LoRA weight : 0.7 - 0.9  (lower if it overpowers content, higher for more style)
+  Sampler     : Euler a / DPM++ 2M Karras
+  Steps       : 26 - 32
+  CFG         : 5 - 7
+  Resolution  : 832x1216 (portrait), 1216x832 (landscape), or 1024x1024
+
+POSITIVE PROMPT TEMPLATE
+  gls2p5d_style, 1girl, solo, <hair>, <outfit>, <setting>,
+  cinematic warm lighting, glossy skin, dewy highlights, high detail, masterpiece
+
+NEGATIVE PROMPT (starting point)
+  lowres, worst quality, low quality, bad anatomy, bad hands, extra digits,
+  text, watermark, signature, jpeg artifacts, blurry, deformed
+
+TIPS
+- Style too strong / faces samey  -> lower LoRA weight to 0.6 or reduce trigger emphasis.
+- Style too weak                   -> raise weight to 0.9-1.0, add "glossy skin, dewy" tags.
+- Want NO text/speech bubbles      -> keep "text, watermark, speech bubble" in negatives.
+- Combine with other LoRAs         -> keep the sum of weights modest (<= ~1.3 total).

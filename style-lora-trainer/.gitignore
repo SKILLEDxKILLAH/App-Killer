@@ -1,0 +1,20 @@
+# Don't commit datasets, weights, or large trainer checkouts
+dataset/raw/*
+dataset/processed/*
+!dataset/raw/.gitkeep
+!dataset/processed/.gitkeep
+output/
+logs/
+samples/
+sd-scripts/
+*.safetensors
+*.ckpt
+*.png
+*.webp
+*.jpg
+*.jpeg
+!docs/**
+__pycache__/
+*.pyc
+.venv/
+venv/

@@ -1,0 +1,21 @@
+# Core image handling / dataset prep (light, always needed)
+Pillow>=10.0.0
+tqdm>=4.66.0
+
+# Optional: auto-tagging with the WD14 (waifu-diffusion) tagger.
+# Recommended for anime/illustration styles. Install if you want auto captions.
+onnxruntime>=1.17.0        # use onnxruntime-gpu instead for CUDA tagging
+huggingface-hub>=0.23.0
+numpy>=1.24.0
+
+# Optional: quick inference test of the trained LoRA (see scripts/generate_samples.py)
+# torch is intentionally NOT pinned here — install the build that matches your CUDA.
+#   pip install torch --index-url https://download.pytorch.org/whl/cu121
+diffusers>=0.27.0
+transformers>=4.40.0
+accelerate>=0.30.0
+safetensors>=0.4.0
+
+# NOTE: The trainer itself (kohya-ss / sd-scripts) is a separate repo you clone.
+# See README.md "Install the trainer". These requirements cover dataset prep,
+# captioning, and inference testing only.

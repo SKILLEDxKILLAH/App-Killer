@@ -1,0 +1,25 @@
+# Dataset config for kohya-ss / sd-scripts (SDXL LoRA).
+# Passed via:  --dataset_config configs/dataset.toml
+#
+# Aspect-ratio bucketing is ON so mixed portrait/landscape refs train without
+# hard cropping. resolution 1024 matches SDXL / Illustrious XL native size.
+
+[general]
+shuffle_caption = true
+caption_extension = ".txt"
+keep_tokens = 1                 # keep the trigger word (1st token) fixed while shuffling the rest
+flip_aug = false                # OFF: asymmetric makeup/hair/clothing details
+color_aug = false               # OFF: color is part of this style, don't perturb it
+
+[[datasets]]
+resolution = 1024
+batch_size = 2
+enable_bucket = true
+bucket_no_upscale = true
+min_bucket_reso = 640
+max_bucket_reso = 1536
+
+  [[datasets.subsets]]
+  image_dir = "dataset/processed"   # output of scripts/prepare_dataset.py
+  num_repeats = 10                  # ~10 for a small (15-40 img) style set
+  # class_tokens is unused because every image already has a caption .txt

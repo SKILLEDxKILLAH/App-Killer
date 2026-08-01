@@ -1,0 +1,9 @@
+# Sample prompts generated during training (sdxl_train_network reads this file).
+# Each line = one image. Flags: --n negative, --w width --h height, --s steps, --l cfg, --d seed
+# Replace the trigger word if you changed it.
+
+gls2p5d_style, 1girl, solo, long black hair, black dress, sitting in a luxury lounge, city lights at night, cinematic warm lighting, glossy skin, high detail --n lowres, bad anatomy, bad hands, text, watermark, worst quality --w 832 --h 1216 --s 28 --l 6 --d 42
+
+gls2p5d_style, 1girl, solo, blonde hair, green eyes, elegant dress, indoor bar, bokeh, dewy skin, dramatic lighting --n lowres, bad anatomy, text, watermark, worst quality, jpeg artifacts --w 832 --h 1216 --s 28 --l 6 --d 123
+
+gls2p5d_style, 1girl, solo, dark skin, curly hair, casual outfit, cozy cafe, soft window light, glossy highlights --n lowres, bad anatomy, text, watermark, worst quality --w 1024 --h 1024 --s 28 --l 6 --d 777

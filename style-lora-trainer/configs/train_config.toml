@@ -1,0 +1,57 @@
+# kohya-ss / sd-scripts SDXL LoRA training config for an ILLUSTRIOUS XL STYLE LoRA.
+# Passed via:  accelerate launch sdxl_train_network.py --config_file configs/train_config.toml --dataset_config configs/dataset.toml
+#
+# These are tuned for a STYLE LoRA from a small reference set (~15-40 images).
+# Edit the two paths at the top, then run scripts/train.sh.
+
+# ------------------------------------------------------------------ paths
+# Point this at your Illustrious XL base checkpoint (.safetensors).
+# Download e.g. "Illustrious-XL-v0.1" or "v1.0" and put the path here.
+pretrained_model_name_or_path = "/path/to/illustriousXL.safetensors"
+output_dir  = "output"
+output_name = "gls2p5d_illustrious_style"    # -> output/gls2p5d_illustrious_style.safetensors
+logging_dir = "logs"
+
+# ------------------------------------------------------------------ model / network
+network_module = "networks.lora"
+network_dim    = 32          # rank; 16-32 is plenty for a style
+network_alpha  = 16
+# Style LoRAs learn better weighted toward attention/style layers.
+# Uncomment to bias learning to the "style" blocks (optional, advanced):
+# network_args = ["conv_dim=16", "conv_alpha=8"]
+
+# ------------------------------------------------------------------ optimizer / schedule
+learning_rate            = 1.0e-4
+unet_lr                  = 1.0e-4
+text_encoder_lr          = 5.0e-5
+optimizer_type           = "AdamW8bit"
+lr_scheduler             = "cosine_with_restarts"
+lr_scheduler_num_cycles  = 3
+lr_warmup_steps          = 0
+max_grad_norm            = 1.0
+min_snr_gamma            = 5          # stabilizes/​improves quality on SDXL
+
+# ------------------------------------------------------------------ length
+max_train_epochs   = 12       # with num_repeats=10 & ~25 imgs -> ~1500 steps
+save_every_n_epochs = 2       # keep intermediate epochs to pick the best one
+save_last_n_epochs  = 6
+
+# ------------------------------------------------------------------ SDXL specifics
+mixed_precision     = "bf16"   # use "fp16" on GPUs without bf16 (e.g. some 20xx)
+save_precision      = "fp16"
+full_bf16           = false
+gradient_checkpointing = true
+cache_latents       = true
+cache_latents_to_disk = true
+no_half_vae         = true     # avoids SDXL VAE NaNs
+max_data_loader_n_workers = 8
+persistent_data_loader_workers = true
+seed                = 42
+
+# ------------------------------------------------------------------ output format
+save_model_as       = "safetensors"
+
+# ------------------------------------------------------------------ sample generation during training (sanity check)
+sample_every_n_epochs = 2
+sample_prompts        = "prompts/sample_prompts.txt"
+sample_sampler        = "euler_a"
