@@ -1,0 +1,75 @@
+name: Android APK (Thorn & Quill)
+
+on:
+  push:
+    branches: [ccr-2f9af1a7-dg8ifg, main]
+    paths:
+      - 'thorn-and-quill/**'
+      - '.github/workflows/android-apk.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: android-apk-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    defaults:
+      run:
+        working-directory: thorn-and-quill
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: thorn-and-quill/package-lock.json
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Test the HTML engine
+        run: npm test
+
+      - name: Generate native Android project
+        run: npx expo prebuild --platform android --no-install
+
+      - name: Build release APK (arm64, debug-signed for sideloading)
+        working-directory: thorn-and-quill/android
+        run: ./gradlew assembleRelease --no-daemon -PreactNativeArchitectures=arm64-v8a
+
+      - name: Rename APK
+        run: |
+          mkdir -p dist
+          cp android/app/build/outputs/apk/release/app-release.apk "dist/thorn-and-quill-${{ github.run_number }}.apk"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: thorn-and-quill-apk
+          path: thorn-and-quill/dist/*.apk
+
+      - name: Publish as a GitHub release (easy phone download)
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: thorn-and-quill-build-${{ github.run_number }}
+          name: Thorn & Quill — Android build ${{ github.run_number }}
+          target_commitish: ${{ github.sha }}
+          prerelease: true
+          body: |
+            Test build of Thorn & Quill for Android (arm64 phones).
+            Download the .apk below on your phone and open it. You may need to allow
+            "Install unknown apps" for your browser. Built from ${{ github.sha }}.
+          files: thorn-and-quill/dist/*.apk
