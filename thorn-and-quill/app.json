@@ -1,0 +1,36 @@
+{
+  "expo": {
+    "name": "Thorn & Quill",
+    "slug": "thorn-and-quill",
+    "version": "1.0.0",
+    "orientation": "default",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "automatic",
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.thornandquill.app"
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#140d18",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "predictiveBackGestureEnabled": false,
+      "package": "com.thornandquill.app"
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      "expo-font",
+      "expo-router"
+    ],
+    "scheme": "thornandquill",
+    "backgroundColor": "#140d18",
+    "experiments": {
+      "typedRoutes": false
+    }
+  }
+}
