@@ -261,7 +261,7 @@ function syncEars() {
 // Inside a claude.ai Artifact the platform holds the microphone and hands the
 // page words. It has to be started by a tap or key press, so there is no wake
 // word there: tap Bells (or hold space), speak, and a pause sends it.
-const talk = { active: false, text: "", timer: 0, pulse: 0 };
+const talk = { active: false, closing: false, text: "", timer: 0, pulse: 0 };
 const PAUSE_MS = 1500;
 
 function startDictation() {
@@ -283,12 +283,15 @@ function startDictation() {
 
 /** Stops listening and, if asked, sends what was heard. */
 async function endDictation(send = true) {
-  if (!talk.active) return;
-  talk.active = false;
+  if (!talk.active || talk.closing) return;
+  talk.closing = true;
   clearTimeout(talk.timer);
   clearTimeout(attentionTimer);
+  // The last words arrive while it stops, so keep collecting until it has.
   await Promise.resolve(hosted.dictation.stop()).catch(() => {});
   const said = talk.text.trim();
+  talk.active = false;
+  talk.closing = false;
   talk.text = "";
   app.attention = "asleep";
   if (send && said) submit(said);
@@ -296,7 +299,7 @@ async function endDictation(send = true) {
 
 function wireDictation(dictation) {
   dictation.onPartial(({ text }) => {
-    if (!talk.active || !text) return;
+    if (!talk.active || talk.closing || !text) return;
     talk.pulse = performance.now();
     readout.hear(`${talk.text} ${text}`.trim());
     clearTimeout(talk.timer);
@@ -307,13 +310,14 @@ function wireDictation(dictation) {
     talk.pulse = performance.now();
     talk.text += text;
     readout.hear(talk.text.trim());
+    if (talk.closing) return;
     keepAttending();
     clearTimeout(talk.timer);
     if (!app.talkKey) talk.timer = setTimeout(() => endDictation(true), PAUSE_MS);
   });
   dictation.onState(({ state }) => {
     // The platform's own Stop button, or the tab going out of view.
-    if (state === "idle" && talk.active) endDictation(true);
+    if (state === "idle" && talk.active && !talk.closing) endDictation(true);
   });
 }
 
