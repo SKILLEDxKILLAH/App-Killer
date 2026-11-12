@@ -88,9 +88,14 @@ public/js/avatar.js  the honeycomb
 public/js/voice.js   ears (speech recognition), mouth (speech), mic meter
 public/js/hud.js     research cards, report wall, charts, panels
 public/js/demo.js    the no-key demo brain and its sample report
+public/js/hosted.js  Claude, voice and dictation from the page itself, when published as a claude.ai Artifact
 ```
 
 Bells' reply streams back as speech and actions in the order she wrote them, and the display performs them in that order: a line, then the report going up, then the next line.
+
+## Hosted, with no server
+
+The same `public/` folder also runs as a claude.ai Artifact. There it has no server and no API key: it asks Claude through the viewer's own account, speaks in a Claude voice and takes dictation where the viewer's app offers them, and falls back to typing and captions where it doesn't. Two things differ from the local version. There is no wake word, because the platform only starts listening from a tap or key press: tap her, or hold space. And there is no web access, so a report is drafted from the model's own knowledge and labelled "from memory, no live sources".
 
 ## Tests
 

@@ -8,6 +8,27 @@ const CONJECTURE = `${WIKI}Honeycomb_conjecture`;
 const TILINGS = `${WIKI}Euclidean_tilings_by_convex_regular_polygons`;
 const HONEYCOMB = `${WIKI}Honeycomb`;
 
+/** A small tiling of hexagons, as an inline SVG image. */
+function drawnComb() {
+  const r = 26;
+  const w = Math.sqrt(3) * r;
+  let cells = "";
+  for (let row = -1; row < 7; row++) {
+    for (let col = -1; col < 10; col++) {
+      const cx = col * w + (row % 2 ? w / 2 : 0);
+      const cy = row * r * 1.5;
+      const points = Array.from({ length: 6 }, (_, i) => {
+        const a = (Math.PI / 180) * (60 * i + 30);
+        return `${(cx + r * 0.92 * Math.cos(a)).toFixed(1)},${(cy + r * 0.92 * Math.sin(a)).toFixed(1)}`;
+      }).join(" ");
+      const fill = (0.1 + 0.5 * Math.abs(Math.sin(col * 1.7 + row * 2.3))).toFixed(2);
+      cells += `<polygon points="${points}" fill="rgba(255,181,46,${fill})" stroke="#ffb52e" stroke-width="1.6"/>`;
+    }
+  }
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 250" preserveAspectRatio="xMidYMid slice"><rect width="400" height="250" fill="#0b0d12"/>${cells}</svg>`;
+  return `data:image/svg+xml,${encodeURIComponent(svg)}`;
+}
+
 export const DEMO_REPORT = {
   headline: "Why bees build hexagons",
   summary:
@@ -45,7 +66,7 @@ export const DEMO_REPORT = {
       body: "Equilateral triangles, squares and regular hexagons are the only regular polygons that cover a flat surface by themselves. Pentagons, and everything with more than six sides, leave gaps or overlap.",
       sources: [TILINGS],
     },
-    { kind: "image", title: "Comb built by honey bees", wikipedia: "Honeycomb", image: null, sources: [HONEYCOMB] },
+    { kind: "image", title: "A hexagonal comb", wikipedia: "Honeycomb", image: null, fallback: drawnComb(), sources: [HONEYCOMB] },
     {
       kind: "stat",
       title: "Year the honeycomb conjecture was proved",

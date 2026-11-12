@@ -225,11 +225,28 @@ export function speakable(text) {
     .trim();
 }
 
+/** Splits long text into lines the platform voice accepts (2,000 characters each). */
+function paragraphs(text) {
+  const lines = [];
+  let current = "";
+  for (const sentence of text.match(/[^.!?]+[.!?]*\s*/g) ?? [text]) {
+    if (current && current.length + sentence.length > 1600) {
+      lines.push({ text: current.trim() });
+      current = "";
+    }
+    current += sentence;
+  }
+  if (current.trim()) lines.push({ text: current.trim().slice(0, 2000) });
+  return lines;
+}
+
 export class Mouth {
   constructor() {
     this.synth = window.speechSynthesis ?? null;
-    this.settings = { voice: "", rate: 0.98, pitch: 0.9, premium: true, captionsOnly: false };
+    this.settings = { voice: "", hostedVoice: "", rate: 0.98, pitch: 0.9, premium: true, captionsOnly: false };
     this.serverVoice = false; // set by the app when the server has one
+    this.tts = null; // the Artifact viewer's voice, when the page is hosted there
+    this.silenced = false;
     this.speaking = false;
     this.pulse = 0;
     this.boundaryAt = 0;
@@ -256,6 +273,20 @@ export class Mouth {
 
   get usingServer() {
     return this.serverVoice && this.settings.premium && this.premiumFailures < 2 && !this.settings.captionsOnly;
+  }
+
+  /** Hands speech to the Artifact viewer, which plays it in a Claude voice. */
+  attach(tts) {
+    this.tts = tts;
+  }
+
+  get usingPlatform() {
+    return Boolean(this.tts) && !this.silenced && !this.settings.captionsOnly;
+  }
+
+  /** The platform voice wants a paragraph per hand-over, not a sentence. */
+  get paragraphs() {
+    return this.usingPlatform;
   }
 
   /** Must be called from a click: browsers only allow speech after one. */
@@ -296,8 +327,9 @@ export class Mouth {
   }
 
   /** Starts fetching premium audio for a line that is queued but not yet due. */
-  prepare(text) {
-    if (!this.usingServer || this.prepared.has(text)) return;
+  prepare(raw) {
+    const text = speakable(raw);
+    if (!text || !this.usingServer || this.prepared.has(text)) return;
     const audio = fetch("api/speak", {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -318,6 +350,7 @@ export class Mouth {
     this.startedAt = performance.now();
     this.boundaryAt = 0;
     try {
+      if (this.usingPlatform) return await this.#platform(text);
       if (this.usingServer) {
         this.prepare(text);
         try {
@@ -330,15 +363,69 @@ export class Mouth {
           this.prepared.delete(text);
         }
       }
-      if (this.settings.captionsOnly || !this.synth || this.synth.getVoices().length === 0) await this.#mime(text);
+      if (this.silenced || this.settings.captionsOnly || !this.synth || this.synth.getVoices().length === 0) await this.#mime(text);
       else await this.#utter(text);
     } finally {
       this.speaking = false;
     }
   }
 
+  /**
+   * Speaks several lines back to back. `onLine(i)` fires as line i starts;
+   * `alive()` turning false ends it between lines.
+   */
+  async recite(lines, onLine, alive = () => true) {
+    const texts = lines.map(speakable);
+    if (this.usingPlatform) {
+      this.speaking = true;
+      this.startedAt = performance.now();
+      try {
+        // One reading, so the platform can have each next line ready before it is due.
+        await this.#platform(
+          texts.map((text, i) => ({ text: text.slice(0, 2000), id: String(i) })),
+          onLine,
+        );
+      } finally {
+        this.speaking = false;
+      }
+      return;
+    }
+    for (const [i, text] of texts.entries()) {
+      if (!alive()) return;
+      if (texts[i + 1]) this.prepare(texts[i + 1]);
+      onLine(i);
+      await this.say(text);
+    }
+  }
+
+  async #platform(what, onLine) {
+    const lines = typeof what === "string" ? paragraphs(what) : what;
+    const unsubscribe = onLine ? this.tts.onLine?.((event) => onLine(Number(event.id ?? event.line))) : null;
+    const options = { rate: this.settings.rate };
+    if (this.settings.hostedVoice) options.voice = this.settings.hostedVoice;
+    try {
+      await this.tts.speak(lines, options);
+    } catch (err) {
+      if (err?.code === "stopped") {
+        // The viewer pressed the platform's own Stop: that ends the whole reply.
+        if (err.reason === "viewer_stopped") this.onViewerStop?.();
+        return;
+      }
+      // Turned off by the viewer, or not offered here: captions only from now
+      // on. No other voice either - that would override their choice.
+      if (err?.code === "not_granted" || err?.code === "unavailable") this.silenced = true;
+      for (const [i, line] of lines.entries()) {
+        if (onLine) onLine(i);
+        await this.#mime(line.text);
+      }
+    } finally {
+      unsubscribe?.();
+    }
+  }
+
   stop() {
     this.cancelled?.();
+    if (this.tts && this.speaking) Promise.resolve(this.tts.stop?.()).catch(() => {});
     this.synth?.cancel();
     try {
       this.playing?.stop();

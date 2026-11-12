@@ -16,8 +16,13 @@
   --hot: #ff5a3c;
   --display: "Oxanium", "Chakra Petch", "Segoe UI", system-ui, sans-serif;
   --mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
-  --gutter: clamp(14px, 2.2vw, 26px);
+  --gutter: clamp(16px, 2.2vw, 26px);
+  /* Side gutters also clear a phone's system bar when the page runs under it. */
+  --gl: max(var(--gutter), env(safe-area-inset-left, 0px));
+  --gr: max(var(--gutter), env(safe-area-inset-right, 0px));
+  --top: calc(52px + env(safe-area-inset-top, 0px));
   --bar: 46px;
+  color-scheme: dark;
   --ease: cubic-bezier(0.22, 0.8, 0.24, 1);
 }
 
@@ -30,6 +35,10 @@
 html,
 body {
   height: 100%;
+}
+
+html {
+  box-sizing: border-box; /* any safe-area padding the host adds stays inside the screen */
 }
 
 body {
@@ -79,7 +88,8 @@ button {
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 0 var(--gutter);
+  padding-left: var(--gl);
+  padding-right: var(--gr);
   text-transform: uppercase;
   letter-spacing: 0.14em;
   font-size: 10px;
@@ -88,7 +98,8 @@ button {
 
 .chrome-top {
   top: 0;
-  height: 52px;
+  height: var(--top);
+  padding-top: env(safe-area-inset-top, 0px);
   justify-content: space-between;
 }
 
@@ -362,8 +373,8 @@ body[data-phase="boot"] #wordmark {
 
 body[data-docked="true"] #bells {
   z-index: 22;
-  left: calc(100% - var(--gutter) - 70px);
-  top: calc(100% - var(--bar) - 92px);
+  left: calc(100% - var(--gr) - 70px);
+  top: calc(100% - var(--bar) - 92px - env(safe-area-inset-bottom, 0px));
   transform: translate(-50%, -50%) scale(0.3);
 }
 
@@ -383,9 +394,9 @@ body[data-docked="true"] #bells::before {
 #cards {
   position: fixed;
   z-index: 20;
-  left: var(--gutter);
+  left: var(--gl);
   top: 50%;
-  width: min(350px, calc(100vw - 2 * var(--gutter)));
+  width: min(350px, calc(100% - var(--gl) - var(--gr)));
   transform: translateY(-50%);
   display: grid;
   gap: 30px;
@@ -524,8 +535,8 @@ body[data-docked="true"] .card-bar {
 #wall {
   position: fixed;
   z-index: 15;
-  inset: 52px 0 0 0;
-  padding: 4px var(--gutter) calc(var(--bar) + 120px);
+  inset: var(--top) 0 0 0;
+  padding: 4px var(--gr) calc(var(--bar) + 120px) var(--gl);
   overflow-y: auto;
   overscroll-behavior: contain;
   scrollbar-width: thin;
@@ -1022,7 +1033,7 @@ body[data-docked="true"] .card-bar {
   bottom: calc(var(--bar) + 30px);
   transform: translateX(-50%);
   width: max-content;
-  max-width: min(74ch, calc(100vw - 2 * var(--gutter)));
+  max-width: min(74ch, calc(100% - var(--gl) - var(--gr)));
   padding: 7px 14px;
   text-align: center;
   font: 500 15px/1.4 var(--mono);
@@ -1040,10 +1051,10 @@ body[data-docked="true"] .card-bar {
 }
 
 body[data-docked="true"] #caption {
-  left: var(--gutter);
+  left: var(--gl);
   transform: none;
   text-align: left;
-  max-width: min(64ch, calc(100vw - 2 * var(--gutter) - 150px));
+  max-width: min(64ch, calc(100% - var(--gl) - var(--gr) - 150px));
   background: rgba(5, 7, 11, 0.95);
 }
 
@@ -1057,9 +1068,9 @@ body[data-docked="true"] .chrome-bottom {
   position: fixed;
   z-index: 25;
   left: 50%;
-  top: 62px;
+  top: calc(var(--top) + 10px);
   transform: translateX(-50%);
-  max-width: min(70ch, calc(100vw - 2 * var(--gutter)));
+  max-width: min(70ch, calc(100% - var(--gl) - var(--gr)));
   padding: 5px 12px;
   font-size: 12px;
   letter-spacing: 0.04em;
@@ -1078,6 +1089,14 @@ body[data-docked="true"] .chrome-bottom {
   opacity: 1;
 }
 
+/* With a report up, the top centre belongs to its title. */
+body[data-docked="true"] #heard {
+  left: auto;
+  right: var(--gr);
+  transform: none;
+  max-width: min(46ch, calc(100% - var(--gl) - var(--gr)));
+}
+
 #heard::before {
   content: "YOU  ";
   color: var(--hot);
@@ -1092,10 +1111,10 @@ body[data-docked="true"] .chrome-bottom {
 #panel {
   position: fixed;
   z-index: 40;
-  top: 52px;
-  right: var(--gutter);
-  width: min(380px, calc(100vw - 2 * var(--gutter)));
-  max-height: calc(100vh - 52px - var(--bar) - 30px);
+  top: var(--top);
+  right: var(--gr);
+  width: min(380px, calc(100% - var(--gl) - var(--gr)));
+  max-height: calc(100% - var(--top) - var(--bar) - 30px);
   display: flex;
   flex-direction: column;
   border: 1px solid var(--line);
@@ -1382,8 +1401,8 @@ body:not([data-phase="boot"]) #boot {
 
   .chrome-top {
     height: auto;
-    min-height: 52px;
-    padding-top: 8px;
+    min-height: var(--top);
+    padding-top: calc(8px + env(safe-area-inset-top, 0px));
     align-items: flex-start;
   }
 
@@ -1397,7 +1416,7 @@ body:not([data-phase="boot"]) #boot {
   }
 
   #cards {
-    top: 138px;
+    top: calc(var(--top) + 86px);
     transform: none;
   }
 
@@ -1406,11 +1425,11 @@ body:not([data-phase="boot"]) #boot {
   }
 
   #wall {
-    inset: 84px 0 0 0;
+    inset: calc(var(--top) + 32px) 0 0 0;
   }
 
   #heard {
-    top: 94px;
+    top: calc(var(--top) + 42px);
   }
 
   #caption {
@@ -1423,7 +1442,7 @@ body:not([data-phase="boot"]) #boot {
   }
 
   body[data-docked="true"] #caption {
-    max-width: calc(100vw - 2 * var(--gutter) - 96px);
+    max-width: calc(100% - var(--gl) - var(--gr) - 96px);
   }
 
   #say {

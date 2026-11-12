@@ -232,12 +232,14 @@ export class Wall {
 
   #render() {
     const report = this.report;
+    this.unsourced = report.origin === "model" ? "MODEL KNOWLEDGE" : "NO SOURCE";
     this.observer.disconnect();
     $("wall-title").textContent = report.headline || report.topic;
     $("wall-summary").textContent = report.summary ?? "";
     const counts = $("wall-counts");
-    counts.replaceChildren(`${report.blocks.length} BLOCKS · ${report.sources.length} SOURCES · ${ago(report.finishedAt ?? report.createdAt).toUpperCase()}`);
+    counts.replaceChildren(`${report.blocks.length} BLOCKS · ${report.sources?.length ?? 0} SOURCES · ${ago(report.finishedAt ?? report.createdAt).toUpperCase()}`);
     if (report.demo) counts.append(el("span", { class: "demo-flag", text: "SAMPLE" }));
+    if (report.origin === "model") counts.append(el("span", { class: "demo-flag", text: "FROM MEMORY // NO LIVE SOURCES" }));
 
     // A long report keeps its notes in stacks so the figures stay in view.
     const perStack = this.tidy ? 3 : report.blocks.length > 10 ? 2 : 1;
@@ -261,7 +263,7 @@ export class Wall {
       node.style.setProperty("--i", nodes.length);
       nodes.push(node);
     });
-    if (report.sources.length) {
+    if (report.sources?.length) {
       const sources = this.#sources(report);
       sources.style.setProperty("--i", nodes.length);
       nodes.push(sources);
@@ -301,7 +303,7 @@ export class Wall {
       el("span", {}, link(pages[0], host), pages.slice(1, 4).map((url, i) => [" ", link(url, String(i + 2))])),
     );
     if (sites.size > 3) shown.push(el("span", { text: `+${sites.size - 3}` }));
-    return el("div", { class: "block-foot" }, el("span", { class: "block-srcs" }, shown.length ? shown : el("span", { text: "NO SOURCE" })), el("span", { class: "block-id", text: block.id.toUpperCase() }));
+    return el("div", { class: "block-foot" }, el("span", { class: "block-srcs" }, shown.length ? shown : el("span", { text: this.unsourced })), el("span", { class: "block-id", text: block.id.toUpperCase() }));
   }
 
   #content(block, index) {
@@ -332,8 +334,11 @@ export class Wall {
       img.src = image.src;
       frame.append(img);
     };
+    // A block may carry its own drawing for when the photograph can't be fetched.
+    const drawn = block.fallback ? { src: block.fallback } : null;
     if (block.image) mount(block.image);
-    else if (block.wikipedia) wikipediaImage(block.wikipedia).then(mount);
+    else if (block.wikipedia) wikipediaImage(block.wikipedia).then((image) => mount(image ?? drawn));
+    else mount(drawn);
     return el(
       "article",
       { class: "block block-image" },
@@ -505,17 +510,8 @@ export class Panel {
     this.body.scrollTop = 0;
   }
 
-  voice({ mouth, prefs, earsSupported, onChange, onTest }) {
+  voice({ mouth, prefs, hosted, earsSupported, onChange, onTest }) {
     if (this.which === "voice") return this.close();
-    const voices = mouth.voices();
-    const current = mouth.chosen();
-    const select = el(
-      "select",
-      { id: "voice-select", onchange: (e) => onChange({ voice: e.target.value }) },
-      voices.length
-        ? voices.map((v) => el("option", { value: v.voiceURI, selected: v === current, text: `${v.name} (${v.lang})` }))
-        : el("option", { value: "", text: "No speech voices in this browser" }),
-    );
     const slider = (name, key, min, max, step) => {
       const out = el("span", { text: Number(mouth.settings[key]).toFixed(2) });
       return el(
@@ -538,6 +534,39 @@ export class Panel {
     };
     const toggle = (label, checked, change, disabled = false) =>
       el("label", { class: "toggle" }, el("input", { type: "checkbox", checked, disabled, onchange: (e) => change(e.target.checked) }), label);
+    const captions = toggle("Captions only, no sound", mouth.settings.captionsOnly, (captionsOnly) => onChange({ captionsOnly }));
+    const test = el("button", { class: "chip", type: "button", text: "Test voice", onclick: onTest });
+
+    // Published as an Artifact: the platform's voices, and tap-to-talk instead of a wake word.
+    if (hosted) {
+      const select = el("select", { id: "voice-select", onchange: (e) => onChange({ hostedVoice: e.target.value }) }, el("option", { value: "", text: "Default" }));
+      Promise.resolve(mouth.tts?.voices?.())
+        .then((names) => {
+          for (const name of names ?? []) select.append(el("option", { value: name, selected: name === mouth.settings.hostedVoice, text: name[0].toUpperCase() + name.slice(1) }));
+        })
+        .catch(() => {});
+      return this.#open("voice", "VOICE", $("chip-voice"), [
+        el("div", { class: "panel-label", text: "Her voice" }),
+        mouth.tts && !mouth.silenced
+          ? el("div", { class: "field" }, el("label", { for: "voice-select", text: "Claude voice" }), select)
+          : el("p", { class: "panel-empty", text: "Reading aloud isn't offered in this view, so her replies appear as captions." }),
+        mouth.tts && !mouth.silenced && slider("Rate", "rate", 0.7, 1.5, 0.01),
+        mouth.tts && !mouth.silenced && captions,
+        mouth.tts && !mouth.silenced && test,
+        el("div", { class: "panel-label", text: "Your voice" }),
+        el("p", { class: "panel-note", text: "Tap Bells, or hold the space bar, and speak; a pause sends it. Where dictation isn't offered, type in the bar at the bottom. Esc stops her talking." }),
+      ]);
+    }
+
+    const voices = mouth.voices();
+    const current = mouth.chosen();
+    const select = el(
+      "select",
+      { id: "voice-select", onchange: (e) => onChange({ voice: e.target.value }) },
+      voices.length
+        ? voices.map((v) => el("option", { value: v.voiceURI, selected: v === current, text: `${v.name} (${v.lang})` }))
+        : el("option", { value: "", text: "No speech voices in this browser" }),
+    );
 
     this.#open("voice", "VOICE", $("chip-voice"), [
       el("div", { class: "panel-label", text: "Her voice" }),
@@ -545,8 +574,8 @@ export class Panel {
       el("div", { class: "field" }, el("label", { for: "voice-select", text: "Browser voice" }), select),
       slider("Rate", "rate", 0.7, 1.3, 0.01),
       slider("Pitch", "pitch", 0.6, 1.4, 0.01),
-      toggle("Captions only, no sound", mouth.settings.captionsOnly, (captionsOnly) => onChange({ captionsOnly })),
-      el("button", { class: "chip", type: "button", text: "Test voice", onclick: onTest }),
+      captions,
+      test,
       el("div", { class: "panel-label", text: "Your voice" }),
       toggle('Wake on "Hey Bells"', prefs.wake && earsSupported, (wake) => onChange({ wake }), !earsSupported),
       toggle("Keep listening for a reply after she speaks", prefs.followUp && earsSupported, (followUp) => onChange({ followUp }), !earsSupported),

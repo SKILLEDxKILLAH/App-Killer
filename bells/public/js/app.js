@@ -24,9 +24,14 @@ function wakeMatch(text) {
 /** Cuts a stream of text into sentences as they complete. */
 class Sentences {
   buffer = "";
+  /** @param {boolean} whole  keep everything until flush(), for voices that take a paragraph at a time */
+  constructor(whole = false) {
+    this.whole = whole;
+  }
   push(delta) {
     this.buffer += delta;
     const out = [];
+    if (this.whole) return out;
     for (;;) {
       const match = /[.!?…]+["')\]]*\s+/.exec(this.buffer);
       if (!match) break;
@@ -80,6 +85,22 @@ class Stage {
     return epoch === this.epoch;
   }
 
+  /** Speaks several lines back to back, calling onStep as each one starts. */
+  async recite(steps, onStep, epoch = this.epoch) {
+    if (epoch !== this.epoch) return false;
+    await this.mouth.recite(
+      steps.map((step) => step.say),
+      (i) => {
+        if (epoch !== this.epoch) return;
+        this.readout.say(steps[i].say);
+        this.hooks.spoke(steps[i].say);
+        onStep(i);
+      },
+      () => epoch === this.epoch,
+    );
+    return epoch === this.epoch;
+  }
+
   stop() {
     this.epoch++;
     this.items = [];
@@ -110,7 +131,7 @@ class Stage {
 
 /* ----------------------------------------------------------------- set-up */
 
-const prefs = { wake: true, followUp: true, voice: "", rate: 0.98, pitch: 0.9, premium: true, captionsOnly: false };
+const prefs = { wake: true, followUp: true, voice: "", hostedVoice: "", rate: 0.98, pitch: 0.9, premium: true, captionsOnly: false };
 try {
   Object.assign(prefs, JSON.parse(localStorage.getItem("bells.prefs") || "{}"));
 } catch {
@@ -124,6 +145,9 @@ function savePrefs() {
   }
 }
 
+document.body.dataset.phase ??= "boot";
+document.body.dataset.avatar ??= "idle";
+
 const avatar = new Honeycomb($("comb"));
 const meter = new MicMeter();
 const mouth = new Mouth();
@@ -132,7 +156,7 @@ const wall = new Wall();
 const panel = new Panel();
 const cards = new Cards((id) => present(id));
 
-Object.assign(mouth.settings, { voice: prefs.voice, rate: prefs.rate, pitch: prefs.pitch, premium: prefs.premium, captionsOnly: prefs.captionsOnly });
+Object.assign(mouth.settings, { voice: prefs.voice, hostedVoice: prefs.hostedVoice, rate: prefs.rate, pitch: prefs.pitch, premium: prefs.premium, captionsOnly: prefs.captionsOnly });
 
 const app = {
   phase: "boot",
@@ -146,6 +170,7 @@ const app = {
 };
 
 let brain = null;
+let hosted = null; // platform voice and dictation, when published as a claude.ai Artifact
 let attentionTimer = 0;
 let speakingUntil = 0;
 
@@ -220,14 +245,76 @@ function keepAttending(ms = ATTEND_MS) {
 function sleep() {
   clearTimeout(attentionTimer);
   app.attention = "asleep";
+  if (talk.active) endDictation(false);
   syncEars();
 }
 
 /** Recognition only runs when it has a reason to: it streams audio off the machine. */
 function syncEars() {
-  const want = Ears.supported && !app.muted && !app.micBlocked && app.phase === "live" && (prefs.wake || app.attention !== "asleep" || app.talkKey);
+  const want = !hosted && Ears.supported && !app.muted && !app.micBlocked && app.phase === "live" && (prefs.wake || app.attention !== "asleep" || app.talkKey);
   if (want) ears.start();
   else ears.stop();
+}
+
+/* ------------------------------------------------- dictation (hosted page) */
+
+// Inside a claude.ai Artifact the platform holds the microphone and hands the
+// page words. It has to be started by a tap or key press, so there is no wake
+// word there: tap Bells (or hold space), speak, and a pause sends it.
+const talk = { active: false, text: "", timer: 0, pulse: 0 };
+const PAUSE_MS = 1500;
+
+function startDictation() {
+  const dictation = hosted?.dictation;
+  if (!dictation || talk.off || talk.active) return;
+  // Straight from the tap: the platform refuses a start that comes any later.
+  const starting = dictation.start();
+  talk.active = true;
+  talk.text = "";
+  if (stage.active || app.busy) interrupt();
+  app.attention = "attending";
+  keepAttending();
+  starting.catch((err) => {
+    talk.active = false;
+    if (err?.code === "not_granted" || err?.code === "unavailable") talk.off = true;
+    app.attention = "asleep";
+  });
+}
+
+/** Stops listening and, if asked, sends what was heard. */
+async function endDictation(send = true) {
+  if (!talk.active) return;
+  talk.active = false;
+  clearTimeout(talk.timer);
+  clearTimeout(attentionTimer);
+  await Promise.resolve(hosted.dictation.stop()).catch(() => {});
+  const said = talk.text.trim();
+  talk.text = "";
+  app.attention = "asleep";
+  if (send && said) submit(said);
+}
+
+function wireDictation(dictation) {
+  dictation.onPartial(({ text }) => {
+    if (!talk.active || !text) return;
+    talk.pulse = performance.now();
+    readout.hear(`${talk.text} ${text}`.trim());
+    clearTimeout(talk.timer);
+    keepAttending();
+  });
+  dictation.onFinal(({ text }) => {
+    if (!talk.active) return;
+    talk.pulse = performance.now();
+    talk.text += text;
+    readout.hear(talk.text.trim());
+    keepAttending();
+    clearTimeout(talk.timer);
+    if (!app.talkKey) talk.timer = setTimeout(() => endDictation(true), PAUSE_MS);
+  });
+  dictation.onState(({ state }) => {
+    // The platform's own Stop button, or the tab going out of view.
+    if (state === "idle" && talk.active) endDictation(true);
+  });
 }
 
 /* ------------------------------------------------------------------ turns */
@@ -256,7 +343,7 @@ async function turn(payload) {
   brain.abort();
   const mine = (turn.count = (turn.count ?? 0) + 1);
   app.busy = true;
-  const sentences = new Sentences();
+  const sentences = new Sentences(mouth.paragraphs);
   let spoken = "";
   const flush = () => {
     const rest = sentences.flush();
@@ -290,7 +377,7 @@ async function turn(payload) {
   // Once she has finished saying it, leave the mic open for an answer.
   const asked = /\?\s*$/.test(spoken.trim());
   stage.act(() => {
-    if (!prefs.followUp || !Ears.supported || app.muted || payload.event?.type === "boot") return;
+    if (hosted || !prefs.followUp || !Ears.supported || app.muted || payload.event?.type === "boot") return;
     app.attention = "followup";
     keepAttending(asked ? FOLLOW_UP_MS * 1.6 : FOLLOW_UP_MS);
     syncEars();
@@ -312,12 +399,7 @@ async function perform(action, epoch) {
       break;
     case "walk": {
       if (wall.showing !== action.id) await present(action.id);
-      for (const [i, step] of action.steps.entries()) {
-        if (epoch !== stage.epoch) break;
-        if (action.steps[i + 1]) mouth.prepare(action.steps[i + 1].say);
-        wall.focus(step.block);
-        if (!(await stage.line(step.say, epoch))) break;
-      }
+      await stage.recite(action.steps, (i) => wall.focus(action.steps[i].block), epoch);
       wall.focus(null);
       break;
     }
@@ -376,6 +458,10 @@ function avatarState() {
 function statusText(state) {
   if (state === "speaking") return "SPEAKING";
   if (state === "thinking") return "THINKING";
+  if (hosted) {
+    if (state === "listening") return "LISTENING // PAUSE OR TAP TO SEND";
+    return hosted.dictation && !talk.off ? "STANDBY // TAP BELLS OR HOLD SPACE TO TALK" : "STANDBY // TYPE TO HER";
+  }
   if (state === "listening") return app.attention === "followup" ? "LISTENING // GO ON" : "LISTENING";
   if (app.muted) return "MIC MUTED // TYPE TO HER";
   if (!Ears.supported) return "NO SPEECH RECOGNITION IN THIS BROWSER // TYPE TO HER";
@@ -394,17 +480,28 @@ function frame() {
   requestAnimationFrame(frame);
 }
 
-avatar.source = () => (avatar.state === "speaking" ? mouth.level : meter.level);
+avatar.source = () => {
+  if (avatar.state === "speaking") return mouth.level;
+  if (!hosted) return meter.level;
+  // No microphone level reaches a hosted page; the comb answers to words arriving instead.
+  return 0.18 + 0.7 * Math.max(0, 1 - (performance.now() - talk.pulse) / 450);
+};
 avatar.start();
 requestAnimationFrame(frame);
 
 /* ------------------------------------------------------------------- boot */
 
 async function connect() {
-  brain = await connectBrain();
+  const link = await connectBrain();
+  brain = link.brain;
+  hosted = link.hosted;
   const label = $("brain-label");
-  label.textContent = brain.label;
-  label.dataset.demo = String(brain.kind === "demo");
+  const showLabel = () => {
+    label.textContent = brain.label;
+    label.dataset.demo = String(brain.kind === "demo");
+  };
+  showLabel();
+  brain.addEventListener("label", showLabel);
   mouth.serverVoice = brain.serverVoice;
   brain.addEventListener("research", (event) => onResearch(event.detail));
   const { reports } = await brain.connect();
@@ -415,9 +512,20 @@ async function connect() {
       app.pending.push(summary.id);
     }
   }
-  if (brain.kind === "demo") {
-    $("boot-note").textContent =
-      "No language model is connected, so she is running a built-in demo. Start the server with an ANTHROPIC_API_KEY for the real thing.";
+
+  const note = $("boot-note");
+  if (hosted) {
+    if (hosted.tts) mouth.attach(hosted.tts);
+    mouth.onViewerStop = interrupt;
+    if (hosted.dictation) wireDictation(hosted.dictation);
+    $("chip-mute").hidden = true;
+    document.querySelector(".meter").hidden = true;
+    note.textContent =
+      brain.kind === "hosted"
+        ? `She runs on Claude through this page, using your account. ${hosted.dictation ? "Tap her to talk, or type." : "Type to her in the bar at the bottom."} She has no web access here, so her reports are written from memory.`
+        : "Claude isn't available to this page here, so she is running a built-in demo.";
+  } else if (brain.kind === "demo") {
+    note.textContent = "No language model is connected, so she is running a built-in demo. Start the server with an ANTHROPIC_API_KEY for the real thing.";
   }
 }
 const connected = connect();
@@ -428,7 +536,7 @@ async function wake() {
   app.phase = "live";
   document.body.dataset.phase = "live";
   await connected;
-  app.micBlocked = !(await meter.start());
+  if (!hosted) app.micBlocked = !(await meter.start());
   syncEars();
 
   let greeted = 0;
@@ -455,6 +563,12 @@ function interrupt() {
 
 $("bells").addEventListener("click", () => {
   if (app.phase === "boot") return wake();
+  if (hosted) {
+    if (talk.active) return endDictation(true);
+    if (hosted.dictation && !talk.off) return startDictation();
+    if (stage.active || app.busy) return interrupt();
+    return $("say-input").focus();
+  }
   if (stage.active || app.busy) return interrupt();
   if (app.attention === "asleep") attend();
   else sleep();
@@ -478,10 +592,11 @@ $("chip-voice").addEventListener("click", () =>
   panel.voice({
     mouth,
     prefs,
+    hosted: Boolean(hosted),
     earsSupported: Ears.supported,
     onChange(change) {
       Object.assign(prefs, change);
-      for (const key of ["voice", "rate", "pitch", "premium", "captionsOnly"]) if (key in change) mouth.settings[key] = change[key];
+      for (const key of ["voice", "rate", "pitch", "premium", "captionsOnly", "hostedVoice"]) if (key in change) mouth.settings[key] = change[key];
       if ("premium" in change) mouth.premiumFailures = 0;
       savePrefs();
       syncEars();
@@ -533,6 +648,10 @@ document.addEventListener("keydown", (event) => {
   } else if (event.code === "Space" && !event.repeat && document.activeElement?.tagName !== "BUTTON") {
     // Hold to talk, no wake word needed.
     event.preventDefault();
+    if (hosted) {
+      app.talkKey = true;
+      return startDictation();
+    }
     if (!Ears.supported || app.muted || app.micBlocked) return;
     if (stage.active) interrupt();
     app.talkKey = true;
@@ -544,6 +663,7 @@ document.addEventListener("keydown", (event) => {
 document.addEventListener("keyup", (event) => {
   if (event.code !== "Space" || !app.talkKey) return;
   app.talkKey = false;
+  if (hosted) return endDictation(true);
   ears.finish();
   keepAttending(2500);
 });

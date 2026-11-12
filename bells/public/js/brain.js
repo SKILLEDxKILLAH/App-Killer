@@ -2,6 +2,7 @@
 // or the scripted stand-in from demo.js when there is no server or no key.
 
 import { DemoBrain } from "./demo.js";
+import { HostedBrain, hostedRuntime } from "./hosted.js";
 
 class ServerBrain extends EventTarget {
   kind = "claude";
@@ -111,19 +112,27 @@ function sessionId() {
   }
 }
 
-/** Picks the brain: the server's if it has a key, the demo otherwise. */
+/**
+ * Picks the brain: Claude through the Artifact viewer when the page is hosted
+ * there, the local server's when it has a key, and the scripted demo otherwise.
+ * `hosted` carries the platform's voice and dictation, when there are any.
+ */
 export async function connectBrain() {
-  const forced = new URLSearchParams(location.search).has("demo");
-  if (!forced) {
-    try {
-      const res = await fetch("api/status", { signal: AbortSignal.timeout(4000) });
-      if (res.ok) {
-        const status = await res.json();
-        if (status.brain === "claude") return new ServerBrain(status);
-      }
-    } catch {
-      // No server behind this page (opened as a file, or hosted statically).
-    }
+  if (new URLSearchParams(location.search).has("demo")) return { brain: new DemoBrain(), hosted: null };
+
+  if (window.claude?.use) {
+    const hosted = await hostedRuntime();
+    return { brain: hosted?.sample ? new HostedBrain(hosted) : new DemoBrain(), hosted };
   }
-  return new DemoBrain();
+
+  try {
+    const res = await fetch("api/status", { signal: AbortSignal.timeout(4000) });
+    if (res.ok) {
+      const status = await res.json();
+      if (status.brain === "claude") return { brain: new ServerBrain(status), hosted: null };
+    }
+  } catch {
+    // No server behind this page (opened as a file, or hosted statically).
+  }
+  return { brain: new DemoBrain(), hosted: null };
 }
