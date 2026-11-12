@@ -8,22 +8,46 @@ class ServerBrain extends EventTarget {
   kind = "claude";
   #reports = new Map();
   #controller = null;
+  #chosenModel = "";
 
   constructor(status) {
     super();
     this.session = sessionId();
+    this.models = [];
     this.#apply(status);
   }
 
   #apply(status) {
     this.model = status.model;
-    // "claude-opus-5-5" reads better on the HUD as "CLAUDE OPUS 5.5".
-    this.label = String(status.model ?? "claude")
+    this.#updateLabel(this.#chosenModel || status.model);
+    this.serverVoice = status.voice === "server";
+    for (const summary of status.reports ?? []) this.#reports.set(summary.id, summary);
+  }
+
+  #updateLabel(model) {
+    this.label = String(model ?? "claude")
       .replace(/(\d)-(?=\d)/g, "$1.")
       .replace(/-/g, " ")
       .toUpperCase();
-    this.serverVoice = status.voice === "server";
-    for (const summary of status.reports ?? []) this.#reports.set(summary.id, summary);
+  }
+
+  setModel(id) {
+    this.#chosenModel = id;
+    this.#updateLabel(id || this.model);
+    this.dispatchEvent(new CustomEvent("label"));
+  }
+
+  get chosenModel() {
+    return this.#chosenModel;
+  }
+
+  async fetchModels() {
+    try {
+      const res = await fetch("api/models");
+      if (!res.ok) return;
+      const body = await res.json();
+      this.models = body.models ?? [];
+    } catch { /* offline */ }
   }
 
   async connect() {
@@ -64,6 +88,7 @@ class ServerBrain extends EventTarget {
         body: JSON.stringify({
           session: this.session,
           tz: Intl.DateTimeFormat().resolvedOptions().timeZone,
+          ...(this.#chosenModel && { model: this.#chosenModel }),
           ...payload,
         }),
         signal: controller.signal,

@@ -3,7 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { config } from "./lib/config.js";
 import { hub } from "./lib/claude.js";
-import { chat, resetSession } from "./lib/brain.js";
+import { chat, resetSession, MODELS } from "./lib/brain.js";
 import { getReport, listReports, summarize } from "./lib/store.js";
 import { studioVoices, synthesize } from "./lib/voices.js";
 
@@ -129,6 +129,7 @@ async function chatRoute(req, res) {
       event: body.event && typeof body.event === "object" ? body.event : null,
       tz: typeof body.tz === "string" ? body.tz.slice(0, 64) : "",
       screen: typeof body.screen === "string" ? body.screen.slice(0, 32) : null,
+      model: typeof body.model === "string" ? body.model.slice(0, 64) : "",
     },
     emit,
     controller.signal,
@@ -178,6 +179,7 @@ const server = http.createServer(async (req, res) => {
       if (pathname === "/api/events") return events(req, res);
       if (pathname === "/api/reports") return send(res, 200, listReports().map(summarize));
       if (pathname === "/api/voices") return await voicesRoute(res);
+      if (pathname === "/api/models") return send(res, 200, { models: MODELS, current: config.model });
       const match = pathname.match(/^\/api\/reports\/([\w-]{1,40})$/);
       if (match) {
         const report = getReport(match[1]);

@@ -276,7 +276,7 @@ body[data-avatar="thinking"] .status-dot {
 #say {
   flex: 1 1 180px;
   display: flex;
-  align-items: center;
+  align-items: flex-end;
   gap: 8px;
   min-width: 0;
   border-bottom: 1px solid var(--line-soft);
@@ -290,6 +290,7 @@ body[data-avatar="thinking"] .status-dot {
 .prompt {
   color: var(--honey);
   font-weight: 700;
+  padding-bottom: 4px;
 }
 
 #say-input {
@@ -302,6 +303,10 @@ body[data-avatar="thinking"] .status-dot {
   font: 500 13px/1.3 var(--mono);
   letter-spacing: 0.02em;
   color: var(--ink);
+  resize: none;
+  overflow-y: auto;
+  max-height: 120px;
+  field-sizing: content;
 }
 
 #say-input::placeholder {

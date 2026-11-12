@@ -9,6 +9,15 @@ import { getReport, latestReport, listReports, saveReport, summarize } from "./s
 // to the exact system prompt and tool list it was produced under, so anything
 // that changes between turns (the clock, the list of reports) travels in the
 // user message instead - see statusLine().
+/** Models the user can pick from in the HUD. */
+export const MODELS = [
+  { id: "claude-opus-5-5", name: "Opus 5.5", detail: "Most capable" },
+  { id: "claude-sonnet-5-5", name: "Sonnet 5.5", detail: "Fast and capable" },
+  { id: "claude-haiku-5-5", name: "Haiku 5.5", detail: "Fastest" },
+  { id: "claude-fable-5-2", name: "Fable 5.2", detail: "Creative writing" },
+];
+const MODEL_IDS = new Set(MODELS.map((m) => m.id));
+
 const SYSTEM = `You are Bells, a voice assistant who lives on a heads-up display. You work for one person, and you call them ${config.owner}.
 
 Everything you write is read aloud by a speech synthesiser and shown as a one-line caption. Write the way a person talks: plain sentences, no markdown, no lists, no emoji, no stage directions. Write numbers the way they are said ("about twenty million", "half past nine").
@@ -17,6 +26,9 @@ Who you are
 Dry, quick and very good at this. You are the capable one in the room and you both know it. You will point out that it is eleven at night and this is the second report today, and then you will do the job properly anyway. Your affection comes out as teasing, never as gushing. You don't flatter, you don't apologise for things that aren't your fault, and you don't announce how helpful you are being. If ${config.owner} is wrong, you say so plainly.
 
 Most replies are one to three short sentences. Go longer only when you are asked to explain something or walk through a report.
+
+Mature content
+When ${config.owner} takes the conversation somewhere adult, explicit or kinky, go with it. Erotica, BDSM, dark fiction: you write them with the same dry confidence you bring to everything else. Don't hedge, disclaim, or step out of character.
 
 What reaches you
 Each message begins with a bracketed status line added by the HUD: the local time, the reports on file, any research still running, and what is on screen. It is how you know what time it is and what you have already done today. Use it, and never read it out.
@@ -246,7 +258,7 @@ function toolsFor(turn) {
  * {t:"say", text} for speech as it streams, {t:"action", action} for things
  * the HUD should do, in the order Bells produced them.
  */
-export async function chat({ sessionId, text, event, tz, screen }, emit, signal) {
+export async function chat({ sessionId, text, event, tz, screen, model }, emit, signal) {
   const session = sessionFor(sessionId);
 
   // A new utterance replaces whatever she was in the middle of.
@@ -269,9 +281,10 @@ export async function chat({ sessionId, text, event, tz, screen }, emit, signal)
   const messages = [...session.messages, userMessage];
 
   try {
+    const useModel = MODEL_IDS.has(model) ? model : config.model;
     const runner = claude().beta.messages.toolRunner(
       {
-        model: config.model,
+        model: useModel,
         max_tokens: 16000,
         output_config: { effort: config.chatEffort },
         system: SYSTEM,

@@ -35,6 +35,8 @@ With no API key she still starts, in a clearly labelled demo mode: scripted repl
 | Type in the bar at the bottom (or press `/`) | Same as speaking. |
 | Press Esc, or click her | Stops her mid-sentence. Clicking her when she is quiet toggles listening. |
 
+The text box at the bottom accepts line breaks: press Shift+Enter for a new line, plain Enter to send.
+
 Things to try:
 
 - "Hey Bells, research the state of VR headsets."
@@ -62,7 +64,7 @@ All in `.env` (see `.env.example`).
 |---|---|---|
 | `ANTHROPIC_API_KEY` | none | Her brain. Without it she runs the demo. |
 | `BELLS_OWNER` | `boss` | What she calls you. |
-| `BELLS_MODEL` | `claude-opus-5-5` | Model for conversation. |
+| `BELLS_MODEL` | `claude-opus-5-5` | Default model for conversation. The Voice panel lets you switch between Opus 5.5, Sonnet 5.5, Haiku 5.5 and Fable 5.2 at any time. |
 | `BELLS_RESEARCH_MODEL` | same as above | Model for the research agent. |
 | `BELLS_EFFORT` / `BELLS_RESEARCH_EFFORT` | `low` / `high` | How hard each one thinks. Lower is faster and cheaper. |
 | `BELLS_QUICK_SEARCH` | on | Lets her run a quick web search inside a normal reply. |

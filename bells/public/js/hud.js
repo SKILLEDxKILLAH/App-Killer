@@ -516,7 +516,7 @@ export class Panel {
    * @param {"wake"|"tap"|"none"} o.listen  how this view can hear the user
    * @param {string} o.listenNote           what to tell them about it
    */
-  async voice({ mouth, prefs, listen, listenNote, onChange, onTest }) {
+  async voice({ mouth, prefs, listen, listenNote, onChange, onTest, brain, onModel }) {
     const draw = (this.voiceDraw = (this.voiceDraw ?? 0) + 1);
     const groups = await mouth.catalog();
     if (draw !== this.voiceDraw) return; // a newer redraw is already on its way
@@ -554,11 +554,29 @@ export class Panel {
     const toggle = (label, checked, change) => el("label", { class: "toggle" }, el("input", { type: "checkbox", checked, onchange: (e) => change(e.target.checked) }), label);
     const canSpeak = groups.length > 0 && !mouth.refused;
 
+    // Model picker (server brain only)
+    const modelSection = [];
+    if (brain?.models?.length) {
+      const current = brain.chosenModel || brain.model;
+      const modelSelect = el(
+        "select",
+        { id: "model-select", onchange: (e) => onModel(e.target.value) },
+        brain.models.map((m) =>
+          el("option", { value: m.id, selected: m.id === current, text: `${m.name}  —  ${m.detail}` }),
+        ),
+      );
+      modelSection.push(
+        el("div", { class: "panel-label", text: "Model" }),
+        el("div", { class: "field" }, el("label", { for: "model-select" }, "Claude model"), modelSelect),
+      );
+    }
+
     this.#open("voice", "VOICE", $("chip-voice"), [
+      ...modelSection,
+
       el("div", { class: "panel-label", text: "Her voice" }),
       canSpeak && el("div", { class: "field" }, el("label", { for: "voice-select" }, "Voice", el("span", { text: `${ids.length} to choose from` })), select),
       el("p", { class: "panel-now" }, el("b", { text: canSpeak ? "NOW " : "" }), mouth.describe()),
-      // Each engine takes what it can: studio voices have their own pacing, and only device voices can be re-pitched.
       canSpeak && how.engine !== "studio" && how.engine !== "none" && slider("Rate", "rate", 0.7, 1.4),
       canSpeak && how.engine === "device" && slider("Pitch", "pitch", 0.6, 1.4),
       canSpeak && toggle("Captions only, no sound", mouth.settings.captionsOnly, (captionsOnly) => onChange({ captionsOnly })),

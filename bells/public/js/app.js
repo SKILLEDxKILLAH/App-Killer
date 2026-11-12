@@ -131,7 +131,7 @@ class Stage {
 
 /* ----------------------------------------------------------------- set-up */
 
-const prefs = { wake: true, followUp: true, autoSend: false, choice: "", rate: 0.98, pitch: 0.9, captionsOnly: false };
+const prefs = { wake: true, followUp: true, autoSend: false, choice: "", rate: 0.98, pitch: 0.9, captionsOnly: false, model: "" };
 try {
   const stored = JSON.parse(localStorage.getItem("bells.prefs") || "{}");
   // Earlier builds kept the device voice and the Claude voice in separate fields.
@@ -286,6 +286,16 @@ function toggleTalk() {
   if (mode === "wake" && !app.muted) {
     if (stage.active || app.busy) interrupt();
     return app.attention === "asleep" ? attend() : sleep();
+  }
+  // Mic was blocked earlier; give it another shot on an explicit press.
+  if (!hosted && Ears.supported && !app.muted) {
+    app.micBlocked = false;
+    meter.start().then((ok) => {
+      if (!ok) app.micBlocked = true;
+    });
+    if (stage.active || app.busy) interrupt();
+    attend();
+    return;
   }
   // No way to listen here: put them in the text box, where a phone keyboard has its own mic.
   app.hint = { text: app.muted ? "MIC MUTED // UNMUTE TO TALK" : "TYPE HERE, OR USE YOUR KEYBOARD'S MIC", until: performance.now() + 6000 };
@@ -550,6 +560,10 @@ async function connect() {
   brain.addEventListener("label", showLabel);
   mouth.serverVoice = brain.serverVoice;
   brain.addEventListener("research", (event) => onResearch(event.detail));
+  if (brain.fetchModels) {
+    await brain.fetchModels();
+    if (prefs.model && brain.models.some((m) => m.id === prefs.model)) brain.setModel(prefs.model);
+  }
   const { reports } = await brain.connect();
   for (const summary of reports) {
     if (summary.status === "running") cards.update(summary);
@@ -618,20 +632,32 @@ $("bells").addEventListener("keydown", (event) => {
   if (event.key === "Enter") $("bells").click();
 });
 
+$("say-input").addEventListener("keydown", (event) => {
+  if (event.key === "Enter" && !event.shiftKey) {
+    event.preventDefault();
+    $("say").requestSubmit();
+  }
+});
+
 $("say").addEventListener("submit", async (event) => {
   event.preventDefault();
   clearTimeout(pauseTimer);
   const input = $("say-input");
   const text = input.value;
   input.value = "";
+  input.style.height = "";
   if (app.phase === "boot") await wake();
   if (text.trim()) submit(text);
 });
 
 let pauseTimer = 0;
 $("say-input").addEventListener("input", (event) => {
+  // Auto-grow the textarea up to max-height, then scroll.
+  const ta = event.target;
+  ta.style.height = "auto";
+  ta.style.height = Math.min(ta.scrollHeight, 120) + "px";
   clearTimeout(pauseTimer);
-  if (!prefs.autoSend || !event.target.value.trim()) return;
+  if (!prefs.autoSend || !ta.value.trim()) return;
   pauseTimer = setTimeout(() => $("say").requestSubmit(), 1800);
 });
 
@@ -643,15 +669,19 @@ function showVoice() {
     prefs,
     listen: listenMode(),
     listenNote: listenNote(),
+    brain,
     onChange(change) {
       Object.assign(prefs, change);
       for (const key of ["choice", "rate", "pitch", "captionsOnly"]) if (key in change) mouth.settings[key] = change[key];
-      // Picking a voice again gives one that had been failing another chance.
       if ("choice" in change) mouth.studioFailures = 0;
       savePrefs();
       syncEars();
-      // A different voice can mean different controls (pitch is device-only), so redraw.
       if ("choice" in change || "captionsOnly" in change) showVoice();
+    },
+    onModel(id) {
+      prefs.model = id;
+      savePrefs();
+      if (brain?.setModel) brain.setModel(id);
     },
     onTest() {
       stage.stop();
@@ -710,7 +740,11 @@ document.addEventListener("keydown", (event) => {
       app.talkKey = true;
       return startDictation();
     }
-    if (!Ears.supported || app.muted || app.micBlocked) return;
+    if (!Ears.supported || app.muted) return;
+    if (app.micBlocked) {
+      app.micBlocked = false;
+      meter.start().then((ok) => { if (!ok) app.micBlocked = true; });
+    }
     if (stage.active) interrupt();
     app.talkKey = true;
     clearTimeout(attentionTimer);
