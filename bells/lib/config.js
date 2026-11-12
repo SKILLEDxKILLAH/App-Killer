@@ -60,9 +60,11 @@ export const config = {
   elevenLabsKey: env.ELEVENLABS_API_KEY || "",
   elevenLabsVoice: env.ELEVENLABS_VOICE_ID || "",
   elevenLabsModel: env.ELEVENLABS_MODEL || "eleven_multilingual_v2",
+  elevenLabsBase: (env.ELEVENLABS_BASE_URL || "https://api.elevenlabs.io").replace(/\/+$/, ""),
 
   dataDir: path.resolve(ROOT, env.BELLS_DATA_DIR || "data"),
   publicDir: path.join(ROOT, "public"),
 };
 
-config.hasServerVoice = Boolean(config.elevenLabsKey && config.elevenLabsVoice);
+// A key is enough: the voice can be chosen in the HUD. ELEVENLABS_VOICE_ID only sets the default.
+config.hasServerVoice = Boolean(config.elevenLabsKey);

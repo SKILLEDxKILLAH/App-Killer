@@ -510,9 +510,28 @@ export class Panel {
     this.body.scrollTop = 0;
   }
 
-  voice({ mouth, prefs, hosted, earsSupported, onChange, onTest }) {
-    if (this.which === "voice") return this.close();
-    const slider = (name, key, min, max, step) => {
+  /**
+   * Draws the voice panel, or redraws it after a change.
+   * @param {object} o
+   * @param {"wake"|"tap"|"none"} o.listen  how this view can hear the user
+   * @param {string} o.listenNote           what to tell them about it
+   */
+  async voice({ mouth, prefs, listen, listenNote, onChange, onTest }) {
+    const draw = (this.voiceDraw = (this.voiceDraw ?? 0) + 1);
+    const groups = await mouth.catalog();
+    if (draw !== this.voiceDraw) return; // a newer redraw is already on its way
+
+    const how = mouth.resolve();
+    const ids = groups.flatMap((group) => group.options.map((option) => option.id));
+    const chosen = ids.includes(mouth.settings.choice) ? mouth.settings.choice : "";
+    const select = el(
+      "select",
+      { id: "voice-select", onchange: (e) => onChange({ choice: e.target.value }) },
+      el("option", { value: "", selected: chosen === "", text: "Automatic" }),
+      groups.map((group) => el("optgroup", { label: group.label }, group.options.map((o) => el("option", { value: o.id, selected: o.id === chosen, text: o.name })))),
+    );
+
+    const slider = (name, key, min, max) => {
       const out = el("span", { text: Number(mouth.settings[key]).toFixed(2) });
       return el(
         "div",
@@ -523,7 +542,7 @@ export class Panel {
           type: "range",
           min,
           max,
-          step,
+          step: 0.01,
           value: mouth.settings[key],
           oninput: (e) => {
             out.textContent = Number(e.target.value).toFixed(2);
@@ -532,59 +551,24 @@ export class Panel {
         }),
       );
     };
-    const toggle = (label, checked, change, disabled = false) =>
-      el("label", { class: "toggle" }, el("input", { type: "checkbox", checked, disabled, onchange: (e) => change(e.target.checked) }), label);
-    const captions = toggle("Captions only, no sound", mouth.settings.captionsOnly, (captionsOnly) => onChange({ captionsOnly }));
-    const test = el("button", { class: "chip", type: "button", text: "Test voice", onclick: onTest });
-
-    // Published as an Artifact: the platform's voices, and tap-to-talk instead of a wake word.
-    if (hosted) {
-      const select = el("select", { id: "voice-select", onchange: (e) => onChange({ hostedVoice: e.target.value }) }, el("option", { value: "", text: "Default" }));
-      Promise.resolve(mouth.tts?.voices?.())
-        .then((names) => {
-          for (const name of names ?? []) select.append(el("option", { value: name, selected: name === mouth.settings.hostedVoice, text: name[0].toUpperCase() + name.slice(1) }));
-        })
-        .catch(() => {});
-      return this.#open("voice", "VOICE", $("chip-voice"), [
-        el("div", { class: "panel-label", text: "Her voice" }),
-        mouth.tts && !mouth.silenced
-          ? el("div", { class: "field" }, el("label", { for: "voice-select", text: "Claude voice" }), select)
-          : el("p", { class: "panel-empty", text: "Reading aloud isn't offered in this view, so her replies appear as captions." }),
-        mouth.tts && !mouth.silenced && slider("Rate", "rate", 0.7, 1.5, 0.01),
-        mouth.tts && !mouth.silenced && captions,
-        mouth.tts && !mouth.silenced && test,
-        el("div", { class: "panel-label", text: "Your voice" }),
-        el("p", { class: "panel-note", text: "Tap Bells, or hold the space bar, and speak; a pause sends it. Where dictation isn't offered, type in the bar at the bottom. Esc stops her talking." }),
-      ]);
-    }
-
-    const voices = mouth.voices();
-    const current = mouth.chosen();
-    const select = el(
-      "select",
-      { id: "voice-select", onchange: (e) => onChange({ voice: e.target.value }) },
-      voices.length
-        ? voices.map((v) => el("option", { value: v.voiceURI, selected: v === current, text: `${v.name} (${v.lang})` }))
-        : el("option", { value: "", text: "No speech voices in this browser" }),
-    );
+    const toggle = (label, checked, change) => el("label", { class: "toggle" }, el("input", { type: "checkbox", checked, onchange: (e) => change(e.target.checked) }), label);
+    const canSpeak = groups.length > 0 && !mouth.refused;
 
     this.#open("voice", "VOICE", $("chip-voice"), [
       el("div", { class: "panel-label", text: "Her voice" }),
-      mouth.serverVoice && toggle("Use the premium voice from the server", mouth.settings.premium, (premium) => onChange({ premium })),
-      el("div", { class: "field" }, el("label", { for: "voice-select", text: "Browser voice" }), select),
-      slider("Rate", "rate", 0.7, 1.3, 0.01),
-      slider("Pitch", "pitch", 0.6, 1.4, 0.01),
-      captions,
-      test,
+      canSpeak && el("div", { class: "field" }, el("label", { for: "voice-select" }, "Voice", el("span", { text: `${ids.length} to choose from` })), select),
+      el("p", { class: "panel-now" }, el("b", { text: canSpeak ? "NOW " : "" }), mouth.describe()),
+      // Each engine takes what it can: studio voices have their own pacing, and only device voices can be re-pitched.
+      canSpeak && how.engine !== "studio" && how.engine !== "none" && slider("Rate", "rate", 0.7, 1.4),
+      canSpeak && how.engine === "device" && slider("Pitch", "pitch", 0.6, 1.4),
+      canSpeak && toggle("Captions only, no sound", mouth.settings.captionsOnly, (captionsOnly) => onChange({ captionsOnly })),
+      canSpeak && el("button", { class: "chip", type: "button", text: "Test voice", onclick: onTest }),
+
       el("div", { class: "panel-label", text: "Your voice" }),
-      toggle('Wake on "Hey Bells"', prefs.wake && earsSupported, (wake) => onChange({ wake }), !earsSupported),
-      toggle("Keep listening for a reply after she speaks", prefs.followUp && earsSupported, (followUp) => onChange({ followUp }), !earsSupported),
-      el("p", {
-        class: "panel-note",
-        text: earsSupported
-          ? "Hold the space bar to talk without the wake word. Esc, or a click on Bells, stops her talking."
-          : "This browser has no speech recognition, so type to her instead. Chrome and Edge can listen.",
-      }),
+      listen === "wake" && toggle('Wake on "Hey Bells"', prefs.wake, (wake) => onChange({ wake })),
+      listen === "wake" && toggle("Keep listening for a reply after she speaks", prefs.followUp, (followUp) => onChange({ followUp })),
+      listen === "none" && toggle("Send what I dictate when I pause", prefs.autoSend, (autoSend) => onChange({ autoSend })),
+      el("p", { class: "panel-note", text: listenNote }),
     ]);
   }
 }

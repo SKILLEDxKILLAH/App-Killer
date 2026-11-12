@@ -131,9 +131,12 @@ class Stage {
 
 /* ----------------------------------------------------------------- set-up */
 
-const prefs = { wake: true, followUp: true, voice: "", hostedVoice: "", rate: 0.98, pitch: 0.9, premium: true, captionsOnly: false };
+const prefs = { wake: true, followUp: true, autoSend: false, choice: "", rate: 0.98, pitch: 0.9, captionsOnly: false };
 try {
-  Object.assign(prefs, JSON.parse(localStorage.getItem("bells.prefs") || "{}"));
+  const stored = JSON.parse(localStorage.getItem("bells.prefs") || "{}");
+  // Earlier builds kept the device voice and the Claude voice in separate fields.
+  if (stored.choice === undefined) stored.choice = stored.hostedVoice ? `claude:${stored.hostedVoice}` : stored.voice ? `device:${stored.voice}` : "";
+  for (const key of Object.keys(prefs)) if (key in stored) prefs[key] = stored[key];
 } catch {
   /* private window: defaults */
 }
@@ -156,7 +159,7 @@ const wall = new Wall();
 const panel = new Panel();
 const cards = new Cards((id) => present(id));
 
-Object.assign(mouth.settings, { voice: prefs.voice, hostedVoice: prefs.hostedVoice, rate: prefs.rate, pitch: prefs.pitch, premium: prefs.premium, captionsOnly: prefs.captionsOnly });
+Object.assign(mouth.settings, { choice: prefs.choice, rate: prefs.rate, pitch: prefs.pitch, captionsOnly: prefs.captionsOnly });
 
 const app = {
   phase: "boot",
@@ -254,6 +257,39 @@ function syncEars() {
   const want = !hosted && Ears.supported && !app.muted && !app.micBlocked && app.phase === "live" && (prefs.wake || app.attention !== "asleep" || app.talkKey);
   if (want) ears.start();
   else ears.stop();
+}
+
+/* ------------------------------------------------------------------- talk */
+
+/** How this view can hear you: a wake word, a tap, or not at all. */
+function listenMode() {
+  if (hosted) return hosted.dictation && !talk.off ? "tap" : "none";
+  return Ears.supported && !app.micBlocked ? "wake" : "none";
+}
+
+function listenNote() {
+  const mode = listenMode();
+  if (mode === "wake") return 'Say "Hey Bells", press Talk, or hold the space bar. Esc, or a click on her, stops her talking.';
+  if (mode === "tap") return "Press Talk, tap Bells, or hold the space bar, then speak. A pause sends it. Esc stops her talking.";
+  if (hosted) {
+    return "This view doesn't hand the microphone to pages. Type to her, or tap the box at the bottom and use the microphone key on your keyboard. To talk to her directly, open this page in Chrome or Edge on a computer.";
+  }
+  if (!Ears.supported) return "This browser has no speech recognition. Type to her, or use your keyboard's microphone key. Chrome and Edge can listen for her name.";
+  return "The microphone is blocked for this page. Allow it in the browser's site settings and reload, or type to her.";
+}
+
+/** The Talk button: start or stop listening by whatever means this view has. */
+function toggleTalk() {
+  if (app.phase === "boot") return wake();
+  const mode = listenMode();
+  if (mode === "tap") return talk.active ? endDictation(true) : startDictation();
+  if (mode === "wake" && !app.muted) {
+    if (stage.active || app.busy) interrupt();
+    return app.attention === "asleep" ? attend() : sleep();
+  }
+  // No way to listen here: put them in the text box, where a phone keyboard has its own mic.
+  app.hint = { text: app.muted ? "MIC MUTED // UNMUTE TO TALK" : "TYPE HERE, OR USE YOUR KEYBOARD'S MIC", until: performance.now() + 6000 };
+  $("say-input").focus();
 }
 
 /* ------------------------------------------------- dictation (hosted page) */
@@ -462,9 +498,10 @@ function avatarState() {
 function statusText(state) {
   if (state === "speaking") return "SPEAKING";
   if (state === "thinking") return "THINKING";
+  if (app.hint && performance.now() < app.hint.until) return app.hint.text;
   if (hosted) {
-    if (state === "listening") return "LISTENING // PAUSE OR TAP TO SEND";
-    return hosted.dictation && !talk.off ? "STANDBY // TAP BELLS OR HOLD SPACE TO TALK" : "STANDBY // TYPE TO HER";
+    if (state === "listening") return "LISTENING // PAUSE OR PRESS TALK TO SEND";
+    return listenMode() === "tap" ? "STANDBY // PRESS TALK OR HOLD SPACE" : "STANDBY // TYPE, OR USE YOUR KEYBOARD'S MIC";
   }
   if (state === "listening") return app.attention === "followup" ? "LISTENING // GO ON" : "LISTENING";
   if (app.muted) return "MIC MUTED // TYPE TO HER";
@@ -481,8 +518,13 @@ function frame() {
   if (document.body.dataset.avatar !== state) document.body.dataset.avatar = state;
   avatar.set(state);
   if (app.phase === "live") readout.setStatus(statusText(state));
+  const listening = String(state === "listening");
+  if (talkChip.getAttribute("aria-pressed") !== listening) talkChip.setAttribute("aria-pressed", listening);
   requestAnimationFrame(frame);
 }
+
+const talkChip = $("chip-talk");
+talkChip.addEventListener("click", toggleTalk);
 
 avatar.source = () => {
   if (avatar.state === "speaking") return mouth.level;
@@ -526,7 +568,7 @@ async function connect() {
     document.querySelector(".meter").hidden = true;
     note.textContent =
       brain.kind === "hosted"
-        ? `She runs on Claude through this page, using your account. ${hosted.dictation ? "Tap her to talk, or type." : "Type to her in the bar at the bottom."} She has no web access here, so her reports are written from memory.`
+        ? `She runs on Claude through this page, using your account. ${hosted.dictation ? "Press Talk or tap her to speak, or type." : "Type to her, or use the microphone key on your keyboard."} She has no web access here, so her reports are written from memory.`
         : "Claude isn't available to this page here, so she is running a built-in demo.";
   } else if (brain.kind === "demo") {
     note.textContent = "No language model is connected, so she is running a built-in demo. Start the server with an ANTHROPIC_API_KEY for the real thing.";
@@ -567,15 +609,10 @@ function interrupt() {
 
 $("bells").addEventListener("click", () => {
   if (app.phase === "boot") return wake();
-  if (hosted) {
-    if (talk.active) return endDictation(true);
-    if (hosted.dictation && !talk.off) return startDictation();
-    if (stage.active || app.busy) return interrupt();
-    return $("say-input").focus();
-  }
+  // Hosted with dictation: a tap both cuts her off and starts listening.
+  if (listenMode() === "tap") return toggleTalk();
   if (stage.active || app.busy) return interrupt();
-  if (app.attention === "asleep") attend();
-  else sleep();
+  toggleTalk();
 });
 $("bells").addEventListener("keydown", (event) => {
   if (event.key === "Enter") $("bells").click();
@@ -583,6 +620,7 @@ $("bells").addEventListener("keydown", (event) => {
 
 $("say").addEventListener("submit", async (event) => {
   event.preventDefault();
+  clearTimeout(pauseTimer);
   const input = $("say-input");
   const text = input.value;
   input.value = "";
@@ -590,27 +628,43 @@ $("say").addEventListener("submit", async (event) => {
   if (text.trim()) submit(text);
 });
 
+let pauseTimer = 0;
+$("say-input").addEventListener("input", (event) => {
+  clearTimeout(pauseTimer);
+  if (!prefs.autoSend || !event.target.value.trim()) return;
+  pauseTimer = setTimeout(() => $("say").requestSubmit(), 1800);
+});
+
 $("chip-history").addEventListener("click", () => panel.history({ reports: brain?.reports() ?? [], lines: app.lines, onOpen: present }));
 
-$("chip-voice").addEventListener("click", () =>
-  panel.voice({
+function showVoice() {
+  return panel.voice({
     mouth,
     prefs,
-    hosted: Boolean(hosted),
-    earsSupported: Ears.supported,
+    listen: listenMode(),
+    listenNote: listenNote(),
     onChange(change) {
       Object.assign(prefs, change);
-      for (const key of ["voice", "rate", "pitch", "premium", "captionsOnly", "hostedVoice"]) if (key in change) mouth.settings[key] = change[key];
-      if ("premium" in change) mouth.premiumFailures = 0;
+      for (const key of ["choice", "rate", "pitch", "captionsOnly"]) if (key in change) mouth.settings[key] = change[key];
+      // Picking a voice again gives one that had been failing another chance.
+      if ("choice" in change) mouth.studioFailures = 0;
       savePrefs();
       syncEars();
+      // A different voice can mean different controls (pitch is device-only), so redraw.
+      if ("choice" in change || "captionsOnly" in change) showVoice();
     },
     onTest() {
       stage.stop();
       stage.say("This is what I sound like, boss. Take it or leave it.");
     },
-  }),
-);
+  });
+}
+
+$("chip-voice").addEventListener("click", () => (panel.which === "voice" ? panel.close() : showVoice()));
+// Voices can arrive after the panel is drawn, and an engine can drop out mid-session.
+mouth.onchange = () => {
+  if (panel.which === "voice") showVoice();
+};
 
 $("chip-tidy").addEventListener("click", (event) => {
   const on = event.currentTarget.getAttribute("aria-pressed") !== "true";
@@ -673,4 +727,4 @@ document.addEventListener("keyup", (event) => {
 });
 
 // For tests and for poking at her from the console.
-window.bells = { app, stage, wall, cards, mouth, ears, avatar, submit, present, clearView, get brain() { return brain; } };
+window.bells = { app, stage, wall, cards, mouth, ears, avatar, prefs, submit, present, clearView, get brain() { return brain; } };

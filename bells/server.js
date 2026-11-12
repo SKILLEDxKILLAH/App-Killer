@@ -5,6 +5,7 @@ import { config } from "./lib/config.js";
 import { hub } from "./lib/claude.js";
 import { chat, resetSession } from "./lib/brain.js";
 import { getReport, listReports, summarize } from "./lib/store.js";
+import { studioVoices, synthesize } from "./lib/voices.js";
 
 const TYPES = {
   ".html": "text/html; charset=utf-8",
@@ -136,27 +137,31 @@ async function chatRoute(req, res) {
   res.end();
 }
 
-/** Optional premium voice: proxies one sentence to ElevenLabs so the key stays here. */
+/** Optional studio voice: one sentence of audio, fetched here so the key never reaches the page. */
 async function speakRoute(req, res) {
-  if (!config.hasServerVoice) return send(res, 404, { error: "No server voice configured." });
+  if (!config.hasServerVoice) return send(res, 404, { error: "No studio voice configured." });
   const body = await readJson(req);
   const text = String(body.text ?? "").trim().slice(0, 1200);
   if (!text) return send(res, 400, { error: "Nothing to say." });
-
-  const url = `https://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(config.elevenLabsVoice)}?output_format=mp3_44100_128`;
-  const upstream = await fetch(url, {
-    method: "POST",
-    headers: { "xi-api-key": config.elevenLabsKey, "content-type": "application/json", accept: "audio/mpeg" },
-    body: JSON.stringify({ text, model_id: config.elevenLabsModel }),
-    signal: AbortSignal.timeout(30_000),
-  });
-  if (!upstream.ok) {
-    const detail = (await upstream.text()).slice(0, 300);
-    console.error(`[bells] ElevenLabs returned ${upstream.status}: ${detail}`);
-    return send(res, 502, { error: `Voice service returned ${upstream.status}.` });
+  try {
+    const audio = await synthesize(text, typeof body.voice === "string" ? body.voice : "");
+    res.writeHead(200, { "content-type": "audio/mpeg", "cache-control": "no-store" });
+    res.end(audio);
+  } catch (err) {
+    console.error(`[bells] ${err.message}`);
+    send(res, 502, { error: "The voice service did not return audio." });
   }
-  res.writeHead(200, { "content-type": "audio/mpeg", "cache-control": "no-store" });
-  res.end(Buffer.from(await upstream.arrayBuffer()));
+}
+
+/** The studio voices on offer, for the picker. */
+async function voicesRoute(res) {
+  if (!config.hasServerVoice) return send(res, 200, { voices: [] });
+  try {
+    send(res, 200, { voices: await studioVoices() });
+  } catch (err) {
+    console.error(`[bells] ${err.message}`);
+    send(res, 502, { error: "The voice service did not return its voices." });
+  }
 }
 
 const server = http.createServer(async (req, res) => {
@@ -172,6 +177,7 @@ const server = http.createServer(async (req, res) => {
       if (pathname === "/api/status") return send(res, 200, status());
       if (pathname === "/api/events") return events(req, res);
       if (pathname === "/api/reports") return send(res, 200, listReports().map(summarize));
+      if (pathname === "/api/voices") return await voicesRoute(res);
       const match = pathname.match(/^\/api\/reports\/([\w-]{1,40})$/);
       if (match) {
         const report = getReport(match[1]);
@@ -205,6 +211,6 @@ server.listen(config.port, config.host, () => {
   const where = `http://${config.host === "0.0.0.0" ? "localhost" : config.host}:${config.port}`;
   console.log(`\n  BELLS is up: ${where}\n`);
   console.log(`  brain  ${config.hasBrain ? config.model : "none - demo mode (set ANTHROPIC_API_KEY for the real thing)"}`);
-  console.log(`  voice  ${config.hasServerVoice ? "ElevenLabs" : "browser speech synthesis"}`);
+  console.log(`  voice  ${config.hasServerVoice ? "ElevenLabs studio voices, plus your browser's" : "your browser's speech synthesis"}`);
   console.log(`  open it in Chrome or Edge, click once, and say "Hey Bells".\n`);
 });

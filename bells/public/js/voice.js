@@ -240,23 +240,39 @@ function paragraphs(text) {
   return lines;
 }
 
+const CLAUDE_VOICES = ["buttery", "airy", "glassy", "rounded"];
+
+/**
+ * Bells' voice. Three kinds of voice can be on offer, depending on where the
+ * page runs, and `settings.choice` picks among them:
+ *
+ *   "claude:<name>"   the Artifact viewer's voices, when the page is hosted there
+ *   "studio:<id>"     ElevenLabs voices, when the local server has a key
+ *   "device:<uri>"    the browser's own speech synthesis
+ *   ""                automatic: the best of whatever is available
+ */
 export class Mouth {
+  #waitedForVoices = false;
+
   constructor() {
     this.synth = window.speechSynthesis ?? null;
-    this.settings = { voice: "", hostedVoice: "", rate: 0.98, pitch: 0.9, premium: true, captionsOnly: false };
-    this.serverVoice = false; // set by the app when the server has one
-    this.tts = null; // the Artifact viewer's voice, when the page is hosted there
-    this.silenced = false;
+    this.settings = { choice: "", rate: 0.98, pitch: 0.9, captionsOnly: false };
+    this.serverVoice = false; // the local server has studio voices
+    this.tts = null; // the Artifact viewer's voice
+    this.refused = false; // the viewer turned reading aloud off for this page
+    this.platformDown = false; // the viewer's voice isn't available in this view
+    this.studioFailures = 0;
     this.speaking = false;
     this.pulse = 0;
     this.boundaryAt = 0;
     this.startedAt = 0;
     this.prepared = new Map();
-    this.premiumFailures = 0;
-    this.synth?.addEventListener?.("voiceschanged", () => this.onvoices?.());
+    /** Called when the set of usable voices changes. */
+    this.onchange = null;
+    this.synth?.addEventListener?.("voiceschanged", () => this.onchange?.());
   }
 
-  /** English voices, best match for Bells first. */
+  /** English device voices, best match for Bells first. */
   voices() {
     const all = this.synth?.getVoices() ?? [];
     return all
@@ -266,27 +282,81 @@ export class Mouth {
       .map((entry) => entry.voice);
   }
 
-  chosen() {
-    const list = this.voices();
-    return list.find((v) => v.voiceURI === this.settings.voice) ?? list[0] ?? null;
-  }
-
-  get usingServer() {
-    return this.serverVoice && this.settings.premium && this.premiumFailures < 2 && !this.settings.captionsOnly;
-  }
-
   /** Hands speech to the Artifact viewer, which plays it in a Claude voice. */
   attach(tts) {
     this.tts = tts;
   }
 
-  get usingPlatform() {
-    return Boolean(this.tts) && !this.silenced && !this.settings.captionsOnly;
+  /** Which engine and voice will say the next line. */
+  resolve() {
+    // A viewer who switched reading aloud off gets silence, not another voice.
+    if (this.settings.captionsOnly || this.refused) return { engine: "none" };
+    const choice = String(this.settings.choice || "");
+    const cut = choice.indexOf(":");
+    const kind = cut > 0 ? choice.slice(0, cut) : "";
+    const id = cut > 0 ? choice.slice(cut + 1) : "";
+    const platform = Boolean(this.tts) && !this.platformDown;
+    const studio = this.serverVoice && this.studioFailures < 2;
+    const device = this.voices();
+
+    if (kind === "claude" && platform) return { engine: "platform", voice: id };
+    if (kind === "studio" && studio) return { engine: "studio", voice: id };
+    if (kind === "device") {
+      const voice = device.find((v) => v.voiceURI === id);
+      if (voice) return { engine: "device", voice };
+    }
+    if (platform) return { engine: "platform", voice: "" };
+    if (studio) return { engine: "studio", voice: "" };
+    if (this.synth?.getVoices().length) return { engine: "device", voice: device[0] ?? null };
+    return { engine: "none" };
   }
 
   /** The platform voice wants a paragraph per hand-over, not a sentence. */
   get paragraphs() {
-    return this.usingPlatform;
+    return this.resolve().engine === "platform";
+  }
+
+  /** Every voice on offer here, grouped by where it comes from. */
+  async catalog() {
+    const groups = [];
+    if (this.tts && !this.refused && !this.platformDown) {
+      this.claudeVoices ??= (await Promise.resolve(this.tts.voices?.()).catch(() => null)) ?? CLAUDE_VOICES;
+      groups.push({
+        label: "Claude voices",
+        options: this.claudeVoices.map((name) => ({ id: `claude:${name}`, name: name[0].toUpperCase() + name.slice(1) })),
+      });
+    }
+    if (this.serverVoice) {
+      if (!this.studioVoices?.length) {
+        this.studioVoices = await fetch("api/voices")
+          .then((res) => (res.ok ? res.json() : null))
+          .then((body) => body?.voices ?? [])
+          .catch(() => []);
+      }
+      if (this.studioVoices.length) {
+        groups.push({
+          label: "Studio voices",
+          options: this.studioVoices.map((v) => ({ id: `studio:${v.id}`, name: v.detail ? `${v.name} (${v.detail})` : v.name })),
+        });
+      }
+    }
+    const device = this.voices();
+    if (device.length) {
+      groups.push({ label: "This device", options: device.map((v) => ({ id: `device:${v.voiceURI}`, name: `${v.name} (${v.lang})` })) });
+    }
+    return groups;
+  }
+
+  /** What is speaking right now, in words, for the panel. */
+  describe() {
+    const how = this.resolve();
+    if (how.engine === "platform") return how.voice ? `Claude voice, ${how.voice}` : "Claude voice";
+    // Automatic means the service's default, which the list puts first.
+    if (how.engine === "studio") return (this.studioVoices?.find((v) => v.id === how.voice) ?? this.studioVoices?.[0])?.name ?? "Studio voice";
+    if (how.engine === "device") return how.voice ? how.voice.name : "This device's default voice";
+    if (this.refused) return "Reading aloud is switched off for this page";
+    if (this.settings.captionsOnly) return "Captions only";
+    return "No voice is available in this view, so replies appear as captions";
   }
 
   /** Must be called from a click: browsers only allow speech after one. */
@@ -302,7 +372,7 @@ export class Mouth {
     this.audio?.resume?.().catch(() => {});
     if (this.synth) {
       this.synth.cancel();
-      const hush = new SpeechSynthesisUtterance(" ");
+      const hush = new SpeechSynthesisUtterance("");
       hush.volume = 0;
       this.synth.speak(hush);
     }
@@ -326,20 +396,25 @@ export class Mouth {
     });
   }
 
-  /** Starts fetching premium audio for a line that is queued but not yet due. */
+  /** Starts fetching studio audio for a line that is queued but not yet due. */
   prepare(raw) {
+    const how = this.resolve();
     const text = speakable(raw);
-    if (!text || !this.usingServer || this.prepared.has(text)) return;
-    const audio = fetch("api/speak", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ text }),
-    })
-      .then((res) => (res.ok ? res.arrayBuffer() : Promise.reject(new Error(`voice ${res.status}`))))
-      .then((bytes) => this.audio.decodeAudioData(bytes));
-    audio.catch(() => {}); // handled where it is awaited
-    this.prepared.set(text, audio);
-    if (this.prepared.size > 12) this.prepared.delete(this.prepared.keys().next().value);
+    if (how.engine !== "studio" || !text || !this.audio) return null;
+    const key = `${how.voice}|${text}`;
+    if (!this.prepared.has(key)) {
+      const audio = fetch("api/speak", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ text, voice: how.voice }),
+      })
+        .then((res) => (res.ok ? res.arrayBuffer() : Promise.reject(new Error(`voice ${res.status}`))))
+        .then((bytes) => this.audio.decodeAudioData(bytes));
+      audio.catch(() => {}); // handled where it is awaited
+      this.prepared.set(key, audio);
+      if (this.prepared.size > 12) this.prepared.delete(this.prepared.keys().next().value);
+    }
+    return key;
   }
 
   /** Speaks one line. Resolves when it has finished or been stopped. */
@@ -350,21 +425,27 @@ export class Mouth {
     this.startedAt = performance.now();
     this.boundaryAt = 0;
     try {
-      if (this.usingPlatform) return await this.#platform(text);
-      if (this.usingServer) {
-        this.prepare(text);
+      const first = this.resolve();
+      if (first.engine === "platform") return await this.#platform(text, null, first.voice);
+      if (first.engine === "studio") {
+        const key = this.prepare(text);
         try {
-          await this.#play(await this.prepared.get(text));
-          this.premiumFailures = 0;
+          await this.#play(await this.prepared.get(key));
+          this.studioFailures = 0;
           return;
         } catch {
-          this.premiumFailures++;
+          // Fall through to a device voice for this line; after two misses in
+          // a row the studio voice is dropped until it is chosen again.
+          if (++this.studioFailures >= 2) this.onchange?.();
         } finally {
-          this.prepared.delete(text);
+          this.prepared.delete(key);
         }
       }
-      if (this.silenced || this.settings.captionsOnly || !this.synth || this.synth.getVoices().length === 0) await this.#mime(text);
-      else await this.#utter(text);
+      // Chrome hands over its voice list a moment after the page loads.
+      await this.#voicesReady();
+      const how = this.resolve();
+      if (how.engine === "none" || !this.synth?.getVoices().length) await this.#mime(text);
+      else await this.#utter(text, how.engine === "device" ? how.voice : this.voices()[0] ?? null);
     } finally {
       this.speaking = false;
     }
@@ -376,7 +457,8 @@ export class Mouth {
    */
   async recite(lines, onLine, alive = () => true) {
     const texts = lines.map(speakable);
-    if (this.usingPlatform) {
+    const how = this.resolve();
+    if (how.engine === "platform") {
       this.speaking = true;
       this.startedAt = performance.now();
       try {
@@ -384,6 +466,7 @@ export class Mouth {
         await this.#platform(
           texts.map((text, i) => ({ text: text.slice(0, 2000), id: String(i) })),
           onLine,
+          how.voice,
         );
       } finally {
         this.speaking = false;
@@ -398,31 +481,6 @@ export class Mouth {
     }
   }
 
-  async #platform(what, onLine) {
-    const lines = typeof what === "string" ? paragraphs(what) : what;
-    const unsubscribe = onLine ? this.tts.onLine?.((event) => onLine(Number(event.id ?? event.line))) : null;
-    const options = { rate: this.settings.rate };
-    if (this.settings.hostedVoice) options.voice = this.settings.hostedVoice;
-    try {
-      await this.tts.speak(lines, options);
-    } catch (err) {
-      if (err?.code === "stopped") {
-        // The viewer pressed the platform's own Stop: that ends the whole reply.
-        if (err.reason === "viewer_stopped") this.onViewerStop?.();
-        return;
-      }
-      // Turned off by the viewer, or not offered here: captions only from now
-      // on. No other voice either - that would override their choice.
-      if (err?.code === "not_granted" || err?.code === "unavailable") this.silenced = true;
-      for (const [i, line] of lines.entries()) {
-        if (onLine) onLine(i);
-        await this.#mime(line.text);
-      }
-    } finally {
-      unsubscribe?.();
-    }
-  }
-
   stop() {
     this.cancelled?.();
     if (this.tts && this.speaking) Promise.resolve(this.tts.stop?.()).catch(() => {});
@@ -431,6 +489,45 @@ export class Mouth {
       this.playing?.stop();
     } catch {
       /* not playing */
+    }
+  }
+
+  async #voicesReady() {
+    if (!this.synth || this.#waitedForVoices || this.synth.getVoices().length) return;
+    this.#waitedForVoices = true;
+    await new Promise((resolve) => {
+      const done = () => {
+        this.synth.removeEventListener?.("voiceschanged", done);
+        resolve();
+      };
+      this.synth.addEventListener?.("voiceschanged", done);
+      setTimeout(done, 1200);
+    });
+  }
+
+  async #platform(what, onLine, voice) {
+    const lines = typeof what === "string" ? paragraphs(what) : what;
+    const unsubscribe = onLine ? this.tts.onLine?.((event) => onLine(Number(event.id ?? event.line))) : null;
+    const options = { rate: this.settings.rate };
+    if (voice) options.voice = voice;
+    try {
+      await this.tts.speak(lines, options);
+    } catch (err) {
+      if (err?.code === "stopped") {
+        // The viewer pressed the platform's own Stop: that ends the whole reply.
+        if (err.reason === "viewer_stopped") this.onViewerStop?.();
+        return;
+      }
+      if (err?.code === "not_granted") this.refused = true;
+      if (err?.code === "unavailable") this.platformDown = true;
+      if (this.refused || this.platformDown) this.onchange?.();
+      // This reply still gets its time on screen as captions.
+      for (const [i, line] of lines.entries()) {
+        if (onLine) onLine(i);
+        await this.#mime(line.text);
+      }
+    } finally {
+      unsubscribe?.();
     }
   }
 
@@ -448,11 +545,10 @@ export class Mouth {
     });
   }
 
-  #utter(text) {
+  #utter(text, voice) {
     return new Promise((resolve) => {
       const utterance = new SpeechSynthesisUtterance(text);
       // With no English voice installed, the system default still speaks.
-      const voice = this.chosen();
       if (voice) utterance.voice = voice;
       utterance.lang = voice?.lang ?? "en-GB";
       utterance.rate = this.settings.rate;
