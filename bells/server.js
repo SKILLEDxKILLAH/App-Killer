@@ -104,7 +104,7 @@ function events(req, res) {
 
 /** One conversational turn, streamed back as newline-delimited JSON. */
 async function chatRoute(req, res) {
-  const body = await readJson(req);
+  const body = await readJson(req, 25 * 1024 * 1024);
   const sessionId = String(body.session ?? "").slice(0, 64);
   if (!sessionId) return send(res, 400, { error: "Missing session." });
   if (!config.hasBrain) return send(res, 503, { error: "No Anthropic credentials configured." });
@@ -130,6 +130,7 @@ async function chatRoute(req, res) {
       tz: typeof body.tz === "string" ? body.tz.slice(0, 64) : "",
       screen: typeof body.screen === "string" ? body.screen.slice(0, 32) : null,
       model: typeof body.model === "string" ? body.model.slice(0, 64) : "",
+      files: Array.isArray(body.files) ? body.files.slice(0, 10) : [],
     },
     emit,
     controller.signal,

@@ -18,6 +18,61 @@ export const MODELS = [
 ];
 const MODEL_IDS = new Set(MODELS.map((m) => m.id));
 
+const IMAGE_RE = /^image\/(png|jpeg|gif|webp)$/i;
+const TEXT_EXT = /\.(json|xml|ya?ml|csv|tsv|md|markdown|py|js|mjs|ts|jsx|tsx|html|css|sh|bash|rb|go|rs|java|c|cpp|h|hpp|cs|swift|kt|sql|r|lua|pl|php|toml|ini|cfg|conf|env|log|txt|svg)$/i;
+
+function isTextFile(type, name) {
+  if (/^text\//i.test(type)) return true;
+  if (/^application\/(json|xml|javascript|typescript|x-yaml|yaml|toml|sql|x-sh|x-python|csv)$/i.test(type)) return true;
+  return TEXT_EXT.test(name);
+}
+
+function formatSize(bytes) {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function fileContentBlocks(files) {
+  if (!Array.isArray(files) || !files.length) return [];
+  const blocks = [];
+  for (const file of files.slice(0, 10)) {
+    if (!file?.data || !file?.name || typeof file.data !== "string") continue;
+    const data = file.data.replace(/\s/g, "");
+    if (!/^[A-Za-z0-9+/]+=*$/.test(data)) continue;
+    const type = String(file.type || "application/octet-stream").toLowerCase();
+    const name = String(file.name).replace(/[<>]/g, "").slice(0, 200);
+
+    if (IMAGE_RE.test(type)) {
+      blocks.push({ type: "image", source: { type: "base64", media_type: type === "image/jpg" ? "image/jpeg" : type, data } });
+    } else if (type === "application/pdf") {
+      blocks.push({ type: "document", source: { type: "base64", media_type: type, data }, title: name });
+    } else if (isTextFile(type, name)) {
+      try {
+        const text = Buffer.from(data, "base64").toString("utf8");
+        blocks.push({ type: "text", text: `--- ${name} ---\n${text.slice(0, 100_000)}\n--- end ${name} ---` });
+      } catch {
+        blocks.push({ type: "text", text: `[attached: ${name}, could not decode as text]` });
+      }
+    } else {
+      const size = Math.ceil(data.length * 3 / 4);
+      blocks.push({ type: "text", text: `[attached: ${name} (${type}, ${formatSize(size)}), binary file — contents not shown]` });
+    }
+  }
+  return blocks;
+}
+
+function stripFileData(messages) {
+  for (const msg of messages) {
+    if (msg.role !== "user" || !Array.isArray(msg.content)) continue;
+    msg.content = msg.content.map((b) => {
+      if (b.type === "image") return { type: "text", text: "[image was shown to Bells]" };
+      if (b.type === "document") return { type: "text", text: `[document was shown to Bells: ${b.title || "file"}]` };
+      return b;
+    });
+  }
+}
+
 const SYSTEM = `You are Bells, a voice assistant who lives on a heads-up display. You work for one person, and you call them ${config.owner}.
 
 Everything you write is read aloud by a speech synthesiser and shown as a one-line caption. Write the way a person talks: plain sentences, no markdown, no lists, no emoji, no stage directions. Write numbers the way they are said ("about twenty million", "half past nine").
@@ -258,7 +313,7 @@ function toolsFor(turn) {
  * {t:"say", text} for speech as it streams, {t:"action", action} for things
  * the HUD should do, in the order Bells produced them.
  */
-export async function chat({ sessionId, text, event, tz, screen, model }, emit, signal) {
+export async function chat({ sessionId, text, event, tz, screen, model, files }, emit, signal) {
   const session = sessionFor(sessionId);
 
   // A new utterance replaces whatever she was in the middle of.
@@ -268,7 +323,7 @@ export async function chat({ sessionId, text, event, tz, screen, model }, emit, 
   }
 
   const said = event ? eventText(event) : String(text ?? "").trim().slice(0, 4000);
-  if (!said) return;
+  if (!said && !(files?.length)) return;
 
   const controller = new AbortController();
   signal?.addEventListener("abort", () => controller.abort(), { once: true });
@@ -277,7 +332,10 @@ export async function chat({ sessionId, text, event, tz, screen, model }, emit, 
   turn.settled = new Promise((resolve) => (finish = resolve));
   session.turn = turn;
 
-  const userMessage = { role: "user", content: `${statusLine({ tz, screen })}\n${said}` };
+  const fileBlocks = fileContentBlocks(files);
+  const statusText = `${statusLine({ tz, screen })}\n${said || "[files attached]"}`;
+  const content = fileBlocks.length ? [{ type: "text", text: statusText }, ...fileBlocks] : statusText;
+  const userMessage = { role: "user", content };
   const messages = [...session.messages, userMessage];
 
   try {
@@ -339,6 +397,7 @@ export async function chat({ sessionId, text, event, tz, screen, model }, emit, 
       emit({ t: "error", say: describeError(err) });
     }
   } finally {
+    stripFileData(session.messages);
     if (session.messages.length > MAX_MESSAGES) session.messages = textOnly(session.messages).slice(-16);
     while (session.messages.length && session.messages[0].role !== "user") session.messages.shift();
     if (session.turn === turn) session.turn = null;

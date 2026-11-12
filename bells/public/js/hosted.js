@@ -376,16 +376,57 @@ export class HostedBrain extends EventTarget {
     this.dispatchEvent(new CustomEvent("label"));
   }
 
+  #isText(type, name) {
+    if (/^text\//i.test(type)) return true;
+    if (/^application\/(json|xml|javascript)$/i.test(type)) return true;
+    return /\.(json|xml|ya?ml|csv|md|py|js|ts|html|css|sh|rb|go|rs|java|c|cpp|h|sql|txt|svg|toml|ini|log)$/i.test(name);
+  }
+
+  #fileBlocks(files) {
+    if (!Array.isArray(files) || !files.length) return [];
+    const blocks = [];
+    for (const file of files.slice(0, 10)) {
+      if (!file?.data || !file?.name) continue;
+      const type = String(file.type || "").toLowerCase();
+      const name = String(file.name).slice(0, 200);
+      if (/^image\/(png|jpe?g|gif|webp)$/i.test(type)) {
+        blocks.push({ type: "image", source: { type: "base64", media_type: type === "image/jpg" ? "image/jpeg" : type, data: file.data } });
+      } else if (type === "application/pdf") {
+        blocks.push({ type: "document", source: { type: "base64", media_type: type, data: file.data }, title: name });
+      } else if (this.#isText(type, name)) {
+        try {
+          const text = atob(file.data);
+          blocks.push({ type: "text", text: `--- ${name} ---\n${text.slice(0, 100_000)}\n--- end ${name} ---` });
+        } catch {
+          blocks.push({ type: "text", text: `[attached: ${name}, could not decode]` });
+        }
+      } else {
+        blocks.push({ type: "text", text: `[attached: ${name} (${type}), binary file]` });
+      }
+    }
+    return blocks;
+  }
+
+  static #stripForHistory(content) {
+    if (typeof content === "string") return content;
+    return content.map((b) =>
+      b.type === "image" ? { type: "text", text: "[image was shown]" } : b.type === "document" ? { type: "text", text: `[document: ${b.title || "file"}]` } : b,
+    );
+  }
+
   async send(payload, on) {
     if (this.#demo) return this.#demo.send(payload, on);
     const said = payload.event ? this.#eventText(payload.event) : String(payload.text ?? "").trim().slice(0, 4000);
-    if (!said) return;
+    if (!said && !(payload.files?.length)) return;
 
     this.#controller?.abort();
     const controller = new AbortController();
     this.#controller = controller;
     const turn = { acted: false, screen: null };
-    const user = { role: "user", content: `${this.#status(payload.screen)}\n${said}` };
+    const statusText = `${this.#status(payload.screen)}\n${said || "[files attached]"}`;
+    const fileBlocks = this.#fileBlocks(payload.files);
+    const content = fileBlocks.length ? [{ type: "text", text: statusText }, ...fileBlocks] : statusText;
+    const user = { role: "user", content };
     let heard = "";
 
     try {
@@ -399,7 +440,7 @@ export class HostedBrain extends EventTarget {
           on.say(delta);
         },
       });
-      this.#turns.push(user, { role: "assistant", content: text });
+      this.#turns.push({ role: "user", content: HostedBrain.#stripForHistory(user.content) }, { role: "assistant", content: text });
     } catch (err) {
       const code = err?.code;
       if (HIDE.has(code)) {
@@ -407,8 +448,9 @@ export class HostedBrain extends EventTarget {
         return this.#demo.send(payload, on);
       }
       const partial = (err?.text ?? heard).trim();
-      if (code === "cancelled") this.#turns.push(user, { role: "assistant", content: partial || "(cut off)" });
-      else if (code === "empty_completion" && turn.acted) this.#turns.push(user, { role: "assistant", content: "(done, without comment)" });
+      const stored = { role: "user", content: HostedBrain.#stripForHistory(user.content) };
+      if (code === "cancelled") this.#turns.push(stored, { role: "assistant", content: partial || "(cut off)" });
+      else if (code === "empty_completion" && turn.acted) this.#turns.push(stored, { role: "assistant", content: "(done, without comment)" });
       else {
         console.error("[bells] Claude call failed", err);
         on.error(sayable(code));

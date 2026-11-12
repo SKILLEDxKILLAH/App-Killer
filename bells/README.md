@@ -37,6 +37,8 @@ With no API key she still starts, in a clearly labelled demo mode: scripted repl
 
 The text box at the bottom accepts line breaks: press Shift+Enter for a new line, plain Enter to send.
 
+You can attach files of any type: click the **+** button next to the prompt, drag files onto the page, or paste a screenshot. Images are shown to Claude through its vision, PDFs are read as documents, text files are inlined, and other files are described by name and type. Up to 10 files at a time, 10 MB each.
+
 Things to try:
 
 - "Hey Bells, research the state of VR headsets."

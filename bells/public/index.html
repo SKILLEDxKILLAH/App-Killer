@@ -71,10 +71,13 @@
     </div>
     <button class="chip chip-talk" id="chip-talk" type="button" aria-pressed="false">Talk</button>
     <button class="chip" id="chip-mute" type="button" aria-pressed="false">Mute</button>
+    <div id="attachments" hidden></div>
     <form id="say" autocomplete="off">
+      <button type="button" class="attach-btn" id="attach-btn" title="Attach files" aria-label="Attach files">+</button>
       <label class="prompt" for="say-input">&gt;</label>
       <textarea id="say-input" placeholder="type to Bells" enterkeyhint="send" aria-label="Type a message to Bells" maxlength="4000" rows="1"></textarea>
     </form>
+    <input type="file" id="file-pick" multiple hidden>
   </footer>
 
   <div id="heard" aria-live="polite"></div>

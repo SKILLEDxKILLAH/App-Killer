@@ -367,17 +367,80 @@ function wireDictation(dictation) {
   });
 }
 
+/* ------------------------------------------------------------------ files */
+
+const attachedFiles = [];
+const MAX_FILE_SIZE = 10 * 1024 * 1024;
+const MAX_FILES = 10;
+
+function attachFiles(fileList) {
+  for (const file of fileList) {
+    if (attachedFiles.length >= MAX_FILES) break;
+    if (file.size > MAX_FILE_SIZE) {
+      app.hint = { text: "FILE TOO LARGE — 10 MB LIMIT", until: performance.now() + 4000 };
+      continue;
+    }
+    attachedFiles.push(file);
+  }
+  renderAttachments();
+}
+
+function removeAttachment(index) {
+  attachedFiles.splice(index, 1);
+  renderAttachments();
+}
+
+function renderAttachments() {
+  const box = $("attachments");
+  box.hidden = !attachedFiles.length;
+  box.replaceChildren(
+    ...attachedFiles.map((file, i) => {
+      const chip = document.createElement("span");
+      chip.className = "attach-chip";
+      const label = file.name.length > 24 ? file.name.slice(0, 20) + "…" + file.name.slice(file.name.lastIndexOf(".")) : file.name;
+      chip.textContent = label;
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "attach-x";
+      btn.textContent = "×";
+      btn.onclick = () => removeAttachment(i);
+      chip.appendChild(btn);
+      return chip;
+    }),
+  );
+}
+
+async function readFilesForSend() {
+  const out = [];
+  for (const file of attachedFiles) {
+    const data = await new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result.split(",")[1]);
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+    out.push({ name: file.name, type: file.type || "application/octet-stream", data });
+  }
+  attachedFiles.length = 0;
+  renderAttachments();
+  return out;
+}
+
 /* ------------------------------------------------------------------ turns */
 
-function submit(text) {
+async function submit(text) {
   const said = text.trim();
-  if (!said || !brain) return;
-  readout.hear(said, { final: true });
+  const hasFiles = attachedFiles.length > 0;
+  if (!said && !hasFiles) return;
+  if (!brain) return;
+  const label = hasFiles && !said ? `[${attachedFiles.length} file${attachedFiles.length > 1 ? "s" : ""}]` : said;
+  readout.hear(label, { final: true });
   closeLine();
-  app.lines.push({ who: "you", text: said });
+  app.lines.push({ who: "you", text: label });
   clearTimeout(attentionTimer);
   app.attention = "asleep";
-  turn({ text: said });
+  const files = hasFiles ? await readFilesForSend() : undefined;
+  turn({ text: said, files });
 }
 
 /** Ends her current entry in the conversation log. */
@@ -647,7 +710,7 @@ $("say").addEventListener("submit", async (event) => {
   input.value = "";
   input.style.height = "";
   if (app.phase === "boot") await wake();
-  if (text.trim()) submit(text);
+  if (text.trim() || attachedFiles.length) submit(text);
 });
 
 let pauseTimer = 0;
@@ -760,5 +823,41 @@ document.addEventListener("keyup", (event) => {
   keepAttending(2500);
 });
 
+/* --------------------------------------------------------- file drop & paste */
+
+$("attach-btn").addEventListener("click", () => $("file-pick").click());
+$("file-pick").addEventListener("change", (e) => {
+  attachFiles(e.target.files);
+  e.target.value = "";
+});
+
+let dragCount = 0;
+document.addEventListener("dragenter", (e) => {
+  e.preventDefault();
+  if (++dragCount === 1) document.body.classList.add("is-dropping");
+});
+document.addEventListener("dragleave", (e) => {
+  e.preventDefault();
+  if (--dragCount <= 0) {
+    dragCount = 0;
+    document.body.classList.remove("is-dropping");
+  }
+});
+document.addEventListener("dragover", (e) => e.preventDefault());
+document.addEventListener("drop", (e) => {
+  e.preventDefault();
+  dragCount = 0;
+  document.body.classList.remove("is-dropping");
+  if (e.dataTransfer?.files?.length) attachFiles(e.dataTransfer.files);
+});
+
+document.addEventListener("paste", (e) => {
+  const files = [...(e.clipboardData?.files ?? [])];
+  if (files.length) {
+    e.preventDefault();
+    attachFiles(files);
+  }
+});
+
 // For tests and for poking at her from the console.
-window.bells = { app, stage, wall, cards, mouth, ears, avatar, prefs, submit, present, clearView, get brain() { return brain; } };
+window.bells = { app, stage, wall, cards, mouth, ears, avatar, prefs, submit, present, clearView, attachFiles, get brain() { return brain; } };
