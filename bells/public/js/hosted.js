@@ -25,6 +25,7 @@ Your tools:
 - focus_block: highlights one block while you answer a question about it.
 - read_report: returns a report's full content without changing the display.
 - clear_screen: takes everything off the display.
+- create_file: makes a file for the boss to download. Use it for code, notes, data exports, stories, character sheets, and documents asked for.
 
 Mature content: when the boss takes the conversation somewhere adult, explicit or kinky, go with it. Erotica, BDSM, dark fiction: write them with the same dry confidence you bring to everything else. Don't hedge, disclaim, or step out of character.
 
@@ -70,7 +71,7 @@ export async function hostedRuntime() {
   let tools = false;
   if (sample) {
     const limits = await sample.limits?.().catch(() => null);
-    tools = (limits?.tools?.maxCount ?? 0) >= 6;
+    tools = (limits?.tools?.maxCount ?? 0) >= 7;
   }
   return { sample: sample && tools ? sample : null, tts, dictation };
 }
@@ -364,6 +365,17 @@ export class HostedBrain extends EventTarget {
         description: "Take the report and any cards off the display.",
         execute: () => act({ type: "clear" }, "The display is clear."),
       },
+      {
+        name: "create_file",
+        description: "Create a file for the user to download. Use for code, notes, data exports, stories, character sheets, and any document asked for.",
+        inputSchema: { type: "object", properties: { name: { type: "string", description: "Filename with extension, e.g. 'report.csv' or 'chapter.md'." }, content: { type: "string", description: "The file's text content." } }, required: ["name", "content"] },
+        execute: ({ name, content }) => {
+          const fname = String(name ?? "file.txt").slice(0, 200);
+          turn.acted = true;
+          on.action({ type: "file_created", name: fname, data: String(content ?? "") });
+          return `File "${fname}" is ready for download.`;
+        },
+      },
     ];
   }
 
@@ -382,6 +394,13 @@ export class HostedBrain extends EventTarget {
     return /\.(json|xml|ya?ml|csv|md|py|js|ts|html|css|sh|rb|go|rs|java|c|cpp|h|sql|txt|svg|toml|ini|log)$/i.test(name);
   }
 
+  #decodeText(b64) {
+    const bin = atob(b64);
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    return new TextDecoder().decode(bytes);
+  }
+
   #fileBlocks(files) {
     if (!Array.isArray(files) || !files.length) return [];
     const blocks = [];
@@ -389,19 +408,19 @@ export class HostedBrain extends EventTarget {
       if (!file?.data || !file?.name) continue;
       const type = String(file.type || "").toLowerCase();
       const name = String(file.name).slice(0, 200);
-      if (/^image\/(png|jpe?g|gif|webp)$/i.test(type)) {
-        blocks.push({ type: "image", source: { type: "base64", media_type: type === "image/jpg" ? "image/jpeg" : type, data: file.data } });
-      } else if (type === "application/pdf") {
-        blocks.push({ type: "document", source: { type: "base64", media_type: type, data: file.data }, title: name });
-      } else if (this.#isText(type, name)) {
-        try {
-          const text = atob(file.data);
+      try {
+        if (/^image\/(png|jpe?g|gif|webp)$/i.test(type)) {
+          blocks.push({ type: "image", source: { type: "base64", media_type: type === "image/jpg" ? "image/jpeg" : type, data: file.data } });
+        } else if (type === "application/pdf") {
+          blocks.push({ type: "document", source: { type: "base64", media_type: type, data: file.data }, title: name });
+        } else if (this.#isText(type, name)) {
+          const text = this.#decodeText(file.data);
           blocks.push({ type: "text", text: `--- ${name} ---\n${text.slice(0, 100_000)}\n--- end ${name} ---` });
-        } catch {
-          blocks.push({ type: "text", text: `[attached: ${name}, could not decode]` });
+        } else {
+          blocks.push({ type: "text", text: `[attached: ${name} (${type}), binary file]` });
         }
-      } else {
-        blocks.push({ type: "text", text: `[attached: ${name} (${type}), binary file]` });
+      } catch {
+        blocks.push({ type: "text", text: `[attached: ${name}, could not read]` });
       }
     }
     return blocks;
@@ -425,7 +444,14 @@ export class HostedBrain extends EventTarget {
     const turn = { acted: false, screen: null };
     const statusText = `${this.#status(payload.screen)}\n${said || "[files attached]"}`;
     const fileBlocks = this.#fileBlocks(payload.files);
-    const content = fileBlocks.length ? [{ type: "text", text: statusText }, ...fileBlocks] : statusText;
+    let content;
+    if (fileBlocks.length) {
+      const hasMedia = fileBlocks.some((b) => b.type !== "text");
+      if (hasMedia) content = [{ type: "text", text: statusText }, ...fileBlocks];
+      else content = statusText + "\n\n" + fileBlocks.map((b) => b.text).join("\n\n");
+    } else {
+      content = statusText;
+    }
     const user = { role: "user", content };
     let heard = "";
 

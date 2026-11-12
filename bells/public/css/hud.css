@@ -377,6 +377,37 @@ body[data-avatar="thinking"] .status-dot {
   color: var(--hot);
 }
 
+#downloads {
+  flex: 0 0 100%;
+  order: -1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.download-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  border: 1px solid var(--honey);
+  background: rgba(255, 181, 46, 0.08);
+  font-size: 10px;
+  color: var(--honey);
+  letter-spacing: 0.06em;
+  max-width: 240px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-decoration: none;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.download-chip:hover {
+  background: rgba(255, 181, 46, 0.18);
+}
+
 body.is-dropping::after {
   content: "DROP FILES HERE";
   position: fixed;

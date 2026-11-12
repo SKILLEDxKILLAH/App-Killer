@@ -97,7 +97,8 @@ What you can do
 - focus_block: highlights one block, for when you are answering a question about it.
 - read_report: fetches a report's full content so you can answer questions about it without putting it up.
 - clear_screen: takes everything off the HUD.
-- cancel_research: stops a job that is still running.${
+- cancel_research: stops a job that is still running.
+- create_file: makes a file for ${config.owner} to download. Use it for code, notes, data exports, stories, character sheets, and any document asked for.${
   config.quickSearch
     ? "\n- web_search: for a quick fact you can give in a sentence (a score, a date, a price). Anything bigger is a research job."
     : ""
@@ -304,6 +305,23 @@ function toolsFor(turn) {
       },
     }),
   ];
+  tools.push(
+    betaZodTool({
+      name: "create_file",
+      description: "Create a file for the user to download. Use for code, notes, data exports, stories, character sheets, and any document asked for.",
+      inputSchema: z.object({
+        name: z.string().min(1).max(200).describe("Filename with extension, e.g. 'report.csv', 'chapter.md', 'script.py'."),
+        content: z.string().describe("The file's text content."),
+      }),
+      eager_input_streaming: true,
+      run: async ({ name, content }) => {
+        const fname = String(name).slice(0, 200);
+        turn.actions.push(`created file "${fname}"`);
+        turn.emit({ t: "action", action: { type: "file_created", name: fname, data: String(content) } });
+        return `File "${fname}" is ready for download.`;
+      },
+    }),
+  );
   if (config.quickSearch) tools.push({ type: "web_search_20260209", name: "web_search", max_uses: 3 });
   return tools;
 }

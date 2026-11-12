@@ -426,6 +426,39 @@ async function readFilesForSend() {
   return out;
 }
 
+/* -------------------------------------------------------------- downloads */
+
+function showDownload(name, data) {
+  const box = $("downloads");
+  const blob = new Blob([data], { type: "application/octet-stream" });
+  const url = URL.createObjectURL(blob);
+
+  const chip = document.createElement("a");
+  chip.className = "download-chip";
+  chip.href = url;
+  chip.download = name;
+  chip.title = `Download ${name}`;
+  const label = name.length > 28 ? name.slice(0, 24) + "…" + name.slice(name.lastIndexOf(".")) : name;
+  chip.textContent = "↓ " + label;
+
+  const dismiss = document.createElement("button");
+  dismiss.type = "button";
+  dismiss.className = "attach-x";
+  dismiss.textContent = "×";
+  dismiss.onclick = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    chip.remove();
+    URL.revokeObjectURL(url);
+    if (!box.children.length) box.hidden = true;
+  };
+  chip.appendChild(dismiss);
+
+  box.appendChild(chip);
+  box.hidden = false;
+  setTimeout(() => { URL.revokeObjectURL(url); chip.remove(); if (!box.children.length) box.hidden = true; }, 300_000);
+}
+
 /* ------------------------------------------------------------------ turns */
 
 async function submit(text) {
@@ -518,6 +551,9 @@ async function perform(action, epoch) {
     }
     case "clear":
       clearView();
+      break;
+    case "file_created":
+      showDownload(action.name, action.data);
       break;
     default:
       console.warn("[bells] unknown action", action);
