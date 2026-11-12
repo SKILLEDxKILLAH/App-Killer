@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="color-scheme" content="dark">
+  <meta name="theme-color" content="#05070b">
+  <title>Bells</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%2305070b'/%3E%3Cpath d='M16 4l10.4 6v12L16 28 5.6 22V10z' fill='none' stroke='%23ffb52e' stroke-width='2.5'/%3E%3Cpath d='M16 11l4.3 2.5v5L16 21l-4.3-2.5v-5z' fill='%23ffb52e'/%3E%3C/svg%3E">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Oxanium:wght@500;700;800&display=swap">
+  <link rel="stylesheet" href="css/hud.css">
+</head>
+<body data-phase="boot" data-avatar="idle">
+
+  <!-- The avatar: a honeycomb drawn on canvas, with her name across it. -->
+  <div id="bells" role="button" tabindex="0" aria-label="Bells. Activate to talk, or to stop her talking.">
+    <canvas id="comb" aria-hidden="true"></canvas>
+    <div id="wordmark" aria-hidden="true">BELLS</div>
+  </div>
+
+  <header class="chrome chrome-top">
+    <div class="ident">
+      <span class="ident-name">BELLS</span>
+      <span class="ident-sep">//</span>
+      <span id="brain-label">STARTING</span>
+    </div>
+    <nav class="chips" aria-label="Display controls">
+      <button class="chip" id="chip-history" type="button" aria-expanded="false" aria-controls="panel">History</button>
+      <button class="chip" id="chip-tidy" type="button" aria-pressed="false">Tidy</button>
+      <button class="chip" id="chip-clear" type="button">Clear view</button>
+      <button class="chip" id="chip-voice" type="button" aria-expanded="false" aria-controls="panel">Voice</button>
+      <button class="chip chip-wide" id="chip-full" type="button">Full screen</button>
+    </nav>
+  </header>
+
+  <!-- Research jobs in flight. -->
+  <section id="cards" aria-label="Research jobs" aria-live="polite"></section>
+
+  <!-- The report wall. -->
+  <main id="wall" hidden>
+    <div class="wall-head">
+      <div class="wall-kicker">REPORT <span class="slashes">//</span> <span id="wall-counts"></span></div>
+      <h1 id="wall-title"></h1>
+      <p id="wall-summary"></p>
+    </div>
+    <div id="wall-grid"></div>
+  </main>
+
+  <aside id="panel" hidden aria-label="Panel">
+    <div class="panel-head">
+      <span id="panel-title">HISTORY</span>
+      <button class="chip" id="panel-close" type="button">Close</button>
+    </div>
+    <div id="panel-body"></div>
+  </aside>
+
+  <!-- What she is saying, as text. -->
+  <div id="caption" aria-live="polite"></div>
+
+  <footer class="chrome chrome-bottom">
+    <div class="status">
+      <span class="status-dot" aria-hidden="true"></span>
+      <span id="status-text">OFFLINE</span>
+    </div>
+    <div class="meter" aria-hidden="true">
+      <div class="meter-track"><div class="meter-fill" id="meter-fill"></div><div class="meter-peak" id="meter-peak"></div></div>
+      <span class="meter-read">LVL <b id="meter-lvl">--.-</b> dB</span>
+      <span class="meter-read meter-pk">PK <b id="meter-pk">--.-</b> dB</span>
+    </div>
+    <button class="chip" id="chip-mute" type="button" aria-pressed="false">Mute</button>
+    <form id="say" autocomplete="off">
+      <label class="prompt" for="say-input">&gt;</label>
+      <input id="say-input" type="text" placeholder="type to Bells" enterkeyhint="send" aria-label="Type a message to Bells" maxlength="2000">
+    </form>
+  </footer>
+
+  <div id="heard" aria-live="polite"></div>
+  <div id="tip" role="tooltip" hidden></div>
+
+  <div id="boot">
+    <div class="boot-inner">
+      <p class="boot-kicker">HEADS-UP ASSISTANT</p>
+      <p class="boot-name">BELLS</p>
+      <button id="boot-go" type="button">Wake her up</button>
+      <p class="boot-note" id="boot-note">She listens for <q>Hey Bells</q> through your microphone and answers out loud. You can also type.</p>
+    </div>
+  </div>
+
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>
